@@ -67,6 +67,8 @@ struct sigar_t {
     char *proc_net;
     /* Native POSIX Thread Library 2.6+ kernel */
     int has_nptl;
+    /* MemAvaliable 3.10+ kernel */
+    int has_avail;
 };
 
 #define HAVE_STRERROR_R

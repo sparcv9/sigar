@@ -293,7 +293,7 @@ SIGAR_DECLARE(int) sigar_proc_mem_get(sigar_t *sigar, sigar_pid_t pid,
                                       sigar_proc_mem_t *procmem);
 
 typedef struct {
-     sigar_uint64_t 
+    sigar_uint64_t 
         bytes_read,
         bytes_written,
         bytes_total;
@@ -316,6 +316,14 @@ typedef struct {
 
 
 typedef struct {
+    sigar_uint64_t
+        chars_read,
+        chars_written,
+        chars_total;
+    sigar_uint64_t
+        calls_read,
+        calls_written,
+        calls_total;
     sigar_uint64_t
         bytes_read,
         bytes_written,

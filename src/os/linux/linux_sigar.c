@@ -336,12 +336,18 @@ int sigar_mem_get(sigar_t *sigar, sigar_mem_t *mem)
     mem->free   = sigar_meminfo(buffer, MEMINFO_PARAM("MemFree"));
     mem->used   = mem->total - mem->free;
 
-    buffers = sigar_meminfo(buffer, MEMINFO_PARAM("Buffers"));
-    cached  = sigar_meminfo(buffer, MEMINFO_PARAM("Cached"));
-
-    kern = buffers + cached;
-    mem->actual_free = mem->free + kern;
-    mem->actual_used = mem->used - kern;
+    if (! sigar->has_avail) {
+        buffers = sigar_meminfo(buffer, MEMINFO_PARAM("Buffers"));
+        cached  = sigar_meminfo(buffer, MEMINFO_PARAM("Cached"));
+        kern    = buffers + cached;
+        mem->actual_free = mem->free + kern;
+        mem->actual_used = mem->used - kern;
+    } else {
+        /* kernel 3.14 and later */
+        avaliable = sigar_meminfo(buffer, MEMINFO_PARAM("MemAvailable"));
+        mem->actual_free = avaliable;
+        mem->actual_used = mem->total - avaliable;
+    }
 
     sigar_mem_calc_ram(sigar, mem);
 
@@ -788,6 +794,14 @@ int sigar_proc_cumulative_disk_io_get(sigar_t *sigar, sigar_pid_t pid,
     if (status != SIGAR_OK) {
         return status;
     }
+
+    proc_cumulative_disk_io->char_read = get_named_proc_token(buffer, "rchar");
+    proc_cumulative_disk_io->char_written = get_named_proc_token(buffer, "\nwchar");
+    proc_cumulative_disk_io->char_total = proc_cumulative_disk_io->char_read + proc_cumulative_disk_io->char_written;
+
+    proc_cumulative_disk_io->calls_read = get_named_proc_token(buffer, "\nsyscr");
+    proc_cumulative_disk_io->calls_written = get_named_proc_token(buffer, "\nsyscw");
+    proc_cumulative_disk_io->calls_total = proc_cumulative_disk_io->calls_read + proc_cumulative_disk_io->calls_written;
 
     proc_cumulative_disk_io->bytes_read = get_named_proc_token(buffer, "\nread_bytes");
     proc_cumulative_disk_io->bytes_written = get_named_proc_token(buffer, "\nwrite_bytes");

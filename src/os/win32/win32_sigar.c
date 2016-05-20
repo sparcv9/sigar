@@ -41,11 +41,11 @@
 
 typedef enum
 {
-	PERF_COUNTER_SYS
-	, PERF_COUNTER_MEM
-	, PERF_COUNTER_PROC
-	, PERF_COUNTER_CPU
-	, PERF_COUNTER_DISK
+    PERF_COUNTER_SYS,
+    PERF_COUNTER_MEM,
+    PERF_COUNTER_PROC,
+    PERF_COUNTER_CPU,
+    PERF_COUNTER_DISK
 } perf_counter_keys_t;
 
 #define PERF_TITLE_CPU_USER    142
@@ -71,8 +71,10 @@ typedef enum {
 #define PERF_TITLE_PPID       1410
 #define PERF_TITLE_PRIORITY   682
 #define PERF_TITLE_START_TIME 684
-#define PERF_TITLE_IO_READ_BYTES_SEC	1420
-#define PERF_TITLE_IO_WRITE_BYTES_SEC	1422
+#define PERF_TITLE_IO_READ_OPERS_SEC    1412
+#define PERF_TITLE_IO_WRITE_OPERS_SEC   1414
+#define PERF_TITLE_IO_READ_BYTES_SEC    1420
+#define PERF_TITLE_IO_WRITE_BYTES_SEC   1422
 
 typedef enum {
     PERF_IX_CPUTIME,
@@ -85,8 +87,10 @@ typedef enum {
     PERF_IX_PPID,
     PERF_IX_PRIORITY,
     PERF_IX_START_TIME,
-	PERF_IX_IO_READ_BYTES_SEC,
-	PERF_IX_IO_WRITE_BYTES_SEC,
+    PERF_IX_IO_READ_OPERS_SEC,
+    PERF_IX_IO_WRITE_OPERS_SEC,
+    PERF_IX_IO_READ_BYTES_SEC,
+    PERF_IX_IO_WRITE_BYTES_SEC,
     PERF_IX_MAX
 } perf_proc_offsets_t;
 
@@ -157,22 +161,22 @@ sigar_uint64_t sigar_FileTimeToTime(FILETIME *ft)
 static DWORD buffer_init(buffer_t *buffer)
 {
     if (!buffer->buffer) {
-		buffer->buffer = malloc(BUFFER_SIZE);
+        buffer->buffer = malloc(BUFFER_SIZE);
         buffer->size = BUFFER_SIZE;
-		buffer->create_time = 0;
+        buffer->create_time = 0;
     }
 
-	return BUFFER_SIZE;
+    return BUFFER_SIZE;
 }
 
 static DWORD buffer_grow(buffer_t *buffer)
 {
-	buffer->size += BUFFER_SIZE;
+    buffer->size += BUFFER_SIZE;
 
-	buffer->buffer =
-		realloc(buffer->buffer, buffer->size);
+    buffer->buffer =
+        realloc(buffer->buffer, buffer->size);
 
-	return buffer->size;
+    return buffer->size;
 }
 
 static char *get_counter_name(char *key)
@@ -196,29 +200,29 @@ static char *get_counter_name(char *key)
 
 static int get_performance_buffer_by_counter_key(sigar_t* sigar, char* counterKey, buffer_t** performanceBuffer)
 {
-	int i;
+    int i;
 
-	if (strEQ(counterKey, PERF_TITLE_SYS_KEY)) {
-		i = PERF_COUNTER_SYS;
-	}
-	else if (strEQ(counterKey, PERF_TITLE_MEM_KEY)) {
-		i = PERF_COUNTER_MEM;
-	}
-	else if (strEQ(counterKey, PERF_TITLE_PROC_KEY)) {
-		i = PERF_COUNTER_PROC;
-	}
-	else if (strEQ(counterKey, PERF_TITLE_CPU_KEY)) {
-		i = PERF_COUNTER_CPU;
-	}
-	else if (strEQ(counterKey, PERF_TITLE_DISK_KEY)) {
-		i = PERF_COUNTER_DISK;
-	} else {
-		return -1;
-	}
+    if (strEQ(counterKey, PERF_TITLE_SYS_KEY)) {
+        i = PERF_COUNTER_SYS;
+    }
+    else if (strEQ(counterKey, PERF_TITLE_MEM_KEY)) {
+        i = PERF_COUNTER_MEM;
+    }
+    else if (strEQ(counterKey, PERF_TITLE_PROC_KEY)) {
+        i = PERF_COUNTER_PROC;
+    }
+    else if (strEQ(counterKey, PERF_TITLE_CPU_KEY)) {
+        i = PERF_COUNTER_CPU;
+    }
+    else if (strEQ(counterKey, PERF_TITLE_DISK_KEY)) {
+        i = PERF_COUNTER_DISK;
+    } else {
+        return -1;
+    }
 
-	*performanceBuffer = sigar->performanceBuffers[i];
-	 return SIGAR_OK;
-	
+    *performanceBuffer = sigar->performanceBuffers[i];
+     return SIGAR_OK;
+    
 }
 
 static PERF_OBJECT_TYPE *get_perf_object_inst(sigar_t *sigar,
@@ -229,28 +233,28 @@ static PERF_OBJECT_TYPE *get_perf_object_inst(sigar_t *sigar,
     WCHAR wcounter_key[MAX_PATH+1];
     PERF_DATA_BLOCK *block;
     PERF_OBJECT_TYPE *object;
-	time_t timenow = time(NULL);
-	buffer_t* performanceBuffer;
+    time_t timenow = time(NULL);
+    buffer_t* performanceBuffer;
     *err = get_performance_buffer_by_counter_key(sigar, counter_key, &performanceBuffer);
-	
-	if (*err != SIGAR_OK) {
-		return NULL;
-	}
+    
+    if (*err != SIGAR_OK) {
+        return NULL;
+    }
 
-	if ((timenow - performanceBuffer->create_time) < SIGAR_BUFFER_EXPIRE) {
-		return PdhFirstObject(((PERF_DATA_BLOCK *)performanceBuffer->buffer));
-	}
-	
-	
-	if (USING_WIDE()) {
+    if ((timenow - performanceBuffer->create_time) < SIGAR_BUFFER_EXPIRE) {
+        return PdhFirstObject(((PERF_DATA_BLOCK *)performanceBuffer->buffer));
+    }
+    
+    
+    if (USING_WIDE()) {
         SIGAR_A2W(counter_key, wcounter_key, sizeof(wcounter_key));
     }
 
-	bytes = buffer_init(performanceBuffer);
-	
+    bytes = buffer_init(performanceBuffer);
+    
     while ((retval = MyRegQueryValue()) != ERROR_SUCCESS) {
         if (retval == ERROR_MORE_DATA) {
-			bytes = buffer_grow(performanceBuffer);
+            bytes = buffer_grow(performanceBuffer);
         }
         else {
             *err = retval;
@@ -258,8 +262,8 @@ static PERF_OBJECT_TYPE *get_perf_object_inst(sigar_t *sigar,
         }
     }
 
-	block = (PERF_DATA_BLOCK *)performanceBuffer->buffer;
-	
+    block = (PERF_DATA_BLOCK *)performanceBuffer->buffer;
+    
     if (block->NumObjectTypes == 0) {
         counter_key = get_counter_name(counter_key);
         sigar_strerror_printf(sigar, "No %s counters defined (disabled?)",
@@ -267,9 +271,9 @@ static PERF_OBJECT_TYPE *get_perf_object_inst(sigar_t *sigar,
         *err = -1;
         return NULL;
     }
-	
-	performanceBuffer->buffer = block;
-	performanceBuffer->create_time = time(NULL);
+    
+    performanceBuffer->buffer = block;
+    performanceBuffer->create_time = time(NULL);
 
     object = PdhFirstObject(block);
 
@@ -594,18 +598,18 @@ int sigar_os_open(sigar_t **sigar_ptr)
     sigar->machine = ""; /* local machine */
     sigar->using_wide = 0; /*XXX*/
 
-	sigar->processesBuffer = (buffer_t*) malloc(sizeof(buffer_t));
-	sigar->processesBuffer->buffer = NULL;
-	buffer_init(sigar->processesBuffer);
+    sigar->processesBuffer = (buffer_t*) malloc(sizeof(buffer_t));
+    sigar->processesBuffer->buffer = NULL;
+    buffer_init(sigar->processesBuffer);
 
-	sigar->performanceBuffers = (buffer_t**)malloc(sizeof(buffer_t *) * 5);
-	for (i = 0; i < 5; i++)
-	{
-		sigar->performanceBuffers[i] = (buffer_t*)malloc(sizeof(buffer_t));
-		sigar->performanceBuffers[i]->buffer = NULL;
-		buffer_init(sigar->performanceBuffers[i]);
-	}
-	
+    sigar->performanceBuffers = (buffer_t**)malloc(sizeof(buffer_t *) * 5);
+    for (i = 0; i < 5; i++)
+    {
+        sigar->performanceBuffers[i] = (buffer_t*)malloc(sizeof(buffer_t));
+        sigar->performanceBuffers[i]->buffer = NULL;
+        buffer_init(sigar->performanceBuffers[i]);
+    }
+    
     version.dwOSVersionInfoSize = sizeof(version);
     GetVersionEx(&version);
 
@@ -670,10 +674,10 @@ void dllmod_init_ntdll(sigar_t *sigar)
 
 void buffer_free(buffer_t* buffer)
 {
-	if (buffer) {
-		free(buffer->buffer);
-		free(buffer);
-	}
+    if (buffer) {
+        free(buffer->buffer);
+        free(buffer);
+    }
 }
 
 int sigar_os_close(sigar_t *sigar)
@@ -689,15 +693,15 @@ int sigar_os_close(sigar_t *sigar)
     DLLMOD_FREE(kernel);
     DLLMOD_FREE(mpr);
 
-	buffer_free(sigar->processesBuffer);
-	
-	if (sigar->performanceBuffers) {
-		for (i = 0; i < 5; i++)	{
-			buffer_free(sigar->performanceBuffers[i]);
-		}
+    buffer_free(sigar->processesBuffer);
+    
+    if (sigar->performanceBuffers) {
+        for (i = 0; i < 5; i++) {
+            buffer_free(sigar->performanceBuffers[i]);
+        }
 
-		free(sigar->performanceBuffers);
-	}
+        free(sigar->performanceBuffers);
+    }
 
     retval = RegCloseKey(sigar->handle);
 
@@ -1220,23 +1224,23 @@ int sigar_os_proc_list_get(sigar_t *sigar,
     if (sigar_EnumProcesses) {
         DWORD retval, *pids;
         DWORD size = 0, i;
-		
-		do {
-			if (size == 0) {
-				size = buffer_init(sigar->processesBuffer);
-			}
-			else {
-				size = buffer_grow(sigar);
-			}
+        
+        do {
+            if (size == 0) {
+                size = buffer_init(sigar->processesBuffer);
+            }
+            else {
+                size = buffer_grow(sigar);
+            }
 
-			if (!sigar_EnumProcesses((DWORD *)sigar->processesBuffer->buffer,
-				sigar->processesBuffer->size,
-				&retval)) {
-				return GetLastError();
-			}
-		} while (retval == sigar->processesBuffer->size); //unlikely 
-		
-		pids = (DWORD *)sigar->processesBuffer->buffer;
+            if (!sigar_EnumProcesses((DWORD *)sigar->processesBuffer->buffer,
+                sigar->processesBuffer->size,
+                &retval)) {
+                return GetLastError();
+            }
+        } while (retval == sigar->processesBuffer->size); //unlikely 
+        
+        pids = (DWORD *)sigar->processesBuffer->buffer;
 
         size = retval / sizeof(DWORD);
 
@@ -1296,6 +1300,14 @@ SIGAR_DECLARE(int) sigar_proc_cumulative_disk_io_get(sigar_t *sigar, sigar_pid_t
     if (status != SIGAR_OK) {
         return status;
     }
+
+    proc_cumulative_disk_io->chars_read = SIGAR_FIELD_NOTIMPL;
+    proc_cumulative_disk_io->chars_written = SIGAR_FIELD_NOTIMPL;
+    proc_cumulative_disk_io->chars_total = pinfo->bytes_read + pinfo->bytes_written;
+
+    proc_cumulative_disk_io->calls_read = pinfo->calls_read;
+    proc_cumulative_disk_io->calls_written = pinfo->calls_written;
+    proc_cumulative_disk_io->calls_total = proc_cumulative_disk_io->calls_read + proc_cumulative_disk_io->calls_written;
 
     proc_cumulative_disk_io->bytes_read = pinfo->bytes_read;
     proc_cumulative_disk_io->bytes_written = pinfo->bytes_written;
@@ -1442,7 +1454,7 @@ SIGAR_DECLARE(int) sigar_proc_time_get(sigar_t *sigar, sigar_pid_t pid,
 }
 
 SIGAR_DECLARE(int) sigar_proc_state_get(sigar_t *sigar, sigar_pid_t pid,
-					sigar_proc_state_t *procstate)
+                    sigar_proc_state_t *procstate)
 {
     int status = get_proc_info(sigar, pid);
     sigar_win32_pinfo_t *pinfo = &sigar->pinfo;
@@ -1535,12 +1547,18 @@ static int get_proc_info(sigar_t *sigar, sigar_pid_t pid)
           case PERF_TITLE_START_TIME:
             perf_offsets[PERF_IX_START_TIME] = offset;
             break;
-		  case PERF_TITLE_IO_READ_BYTES_SEC:
-			perf_offsets[PERF_IX_IO_READ_BYTES_SEC] = offset;
-			break;
-		  case PERF_TITLE_IO_WRITE_BYTES_SEC:
-			perf_offsets[PERF_IX_IO_WRITE_BYTES_SEC] = offset;
-			break;
+          case PERF_TITLE_IO_READ_OPERS_SEC:
+              perf_offsets[PERF_IX_IO_READ_OPERS_SEC] = offset;
+              break;
+          case PERF_TITLE_IO_WRITE_OPERS_SEC:
+              perf_offsets[PERF_IX_IO_WRITE_OPERS_SEC] = offset;
+              break;
+          case PERF_TITLE_IO_READ_BYTES_SEC:
+            perf_offsets[PERF_IX_IO_READ_BYTES_SEC] = offset;
+            break;
+          case PERF_TITLE_IO_WRITE_BYTES_SEC:
+            perf_offsets[PERF_IX_IO_WRITE_BYTES_SEC] = offset;
+            break;
         }
     }
 
@@ -1566,8 +1584,10 @@ static int get_proc_info(sigar_t *sigar, sigar_pid_t pid)
         pinfo->handles  = PERF_VAL(PERF_IX_HANDLE_CNT);
         pinfo->threads  = PERF_VAL(PERF_IX_THREAD_CNT);
         pinfo->page_faults = PERF_VAL(PERF_IX_PAGE_FAULTS);
-		pinfo->bytes_read = PERF_VAL(PERF_IX_IO_READ_BYTES_SEC);
-		pinfo->bytes_written = PERF_VAL(PERF_IX_IO_WRITE_BYTES_SEC);
+        pinfo->calls_read = PERF_VAL(PERF_IX_IO_READ_OPERS_SEC);
+        pinfo->calls_written = PERF_VAL(PERF_IX_IO_WRITE_OPERS_SEC);
+        pinfo->bytes_read = PERF_VAL(PERF_IX_IO_READ_BYTES_SEC);
+        pinfo->bytes_written = PERF_VAL(PERF_IX_IO_WRITE_BYTES_SEC);
 
         return SIGAR_OK;
     }
@@ -1594,7 +1614,7 @@ static int sigar_remote_proc_args_get(sigar_t *sigar, sigar_pid_t pid,
 
     /* likely we are 32-bit, pid process is 64-bit */
 #ifdef MSVC
-    status = sigar_proc_args_wmi_get(sigar, pid, procargs);
+//    status = sigar_proc_args_wmi_get(sigar, pid, procargs);
 #endif
     if (status == ERROR_NOT_FOUND) {
         status = SIGAR_NO_SUCH_PROCESS;
@@ -1769,7 +1789,7 @@ SIGAR_DECLARE(int) sigar_proc_exe_get(sigar_t *sigar, sigar_pid_t pid,
     if (procexe->name[0] == '\0') {
         /* likely we are 32-bit, pid process is 64-bit */
         /* procexe->cwd[0] = XXX where else can we try? */
-        status = sigar_proc_exe_wmi_get(sigar, pid, procexe);
+        //status = sigar_proc_exe_wmi_get(sigar, pid, procexe);
         if (status == ERROR_NOT_FOUND) {
             status = SIGAR_NO_SUCH_PROCESS;
         }
@@ -3843,24 +3863,24 @@ int sigar_os_sys_info_get(sigar_t *sigar,
                 code_name = "Vienna";
             }
         }
-	else {
+    else {
              // not nt work station
              if (version.dwMinorVersion == 0 || version.dwMinorVersion ==1) {
-            	vendor_name = "Windows 2008";
-            	vendor_version = "2008";
-	        code_name = "Longhorn Server";
+                vendor_name = "Windows 2008";
+                vendor_version = "2008";
+            code_name = "Longhorn Server";
              }
-	     else if (version.dwMinorVersion == 2 || version.dwMinorVersion == 3) {
- 	    	vendor_name = "Windows 2012";
-            	vendor_version = "2012";
-            	code_name = "Windows Server 8";
-	     }
-	     else {
-		// defaults
-		 vendor_name = "Windows Unknown";
-		 vendor_version = "2012";
-	     }
-	}
+         else if (version.dwMinorVersion == 2 || version.dwMinorVersion == 3) {
+            vendor_name = "Windows 2012";
+                vendor_version = "2012";
+                code_name = "Windows Server 8";
+         }
+         else {
+        // defaults
+         vendor_name = "Windows Unknown";
+         vendor_version = "2012";
+         }
+    }
 
     }
 

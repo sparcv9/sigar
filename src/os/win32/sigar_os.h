@@ -24,8 +24,10 @@
 #endif
 
 #ifdef MSVC
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
-#define snprintf _snprintf
+#endif
+//#define snprintf _snprintf
 #if _MSC_VER <= 1200
 #define SIGAR_USING_MSC6 /* Visual Studio version 6 */
 #define HAVE_MIB_IPADDRROW_WTYPE 0
@@ -61,7 +63,7 @@
 #else
 /* The GCC compiler doesn't require/accept the ## prefix */
 #  define INT64_C(val) val##L
-#  define SIGAR_DLLFUNC(api, name)		\
+#  define SIGAR_DLLFUNC(api, name)      \
     struct { \
          const char *name; \
          api##_##name func; \
@@ -345,8 +347,10 @@ typedef struct {
     sigar_uint64_t handles;
     sigar_uint64_t threads;
     sigar_uint64_t page_faults;
-	sigar_uint64_t bytes_read;
-	sigar_uint64_t bytes_written;
+    sigar_uint64_t calls_read;
+    sigar_uint64_t calls_written;
+    sigar_uint64_t bytes_read;
+    sigar_uint64_t bytes_written;
 } sigar_win32_pinfo_t;
 
 typedef struct {
@@ -572,9 +576,9 @@ typedef struct {
 
 typedef struct
 {
-	char *buffer;
-	DWORD size;
-	time_t create_time;
+    char *buffer;
+    DWORD size;
+    time_t create_time;
 } buffer_t;
 
 struct sigar_t {
@@ -583,8 +587,8 @@ struct sigar_t {
     int using_wide;
     long pagesize;
     HKEY handle;
-	buffer_t** performanceBuffers;
-	buffer_t* processesBuffer;
+    buffer_t** performanceBuffers;
+    buffer_t* processesBuffer;
     sigar_wtsapi_t wtsapi;
     sigar_iphlpapi_t iphlpapi;
     sigar_advapi_t advapi;
