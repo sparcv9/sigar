@@ -322,7 +322,7 @@ static SIGAR_INLINE sigar_uint64_t sigar_meminfo(char *buffer,
 
 int sigar_mem_get(sigar_t *sigar, sigar_mem_t *mem)
 {
-    sigar_uint64_t buffers, cached, kern;
+    sigar_uint64_t buffers, cached, avaliable, kern;
     char buffer[BUFSIZ];
 
     int status = sigar_file2str(PROC_MEMINFO,
