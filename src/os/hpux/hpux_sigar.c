@@ -324,7 +324,7 @@ int sigar_proc_cumulative_disk_io_get(sigar_t *sigar, sigar_pid_t pid,
 
     proc_cumulative_disk_io->calls_read = SIGAR_FIELD_NOTIMPL; 
     proc_cumulative_disk_io->calls_written = SIGAR_FIELD_NOTIMPL; 
-    proc_cumulative_disk_io->calls_total =  pst.pst_msgrcv + pst.pst_msgsnd;
+    proc_cumulative_disk_io->calls_total =  pinfo->pst_msgrcv + pinfo->pst_msgsnd;
 
     proc_cumulative_disk_io->bytes_read = SIGAR_FIELD_NOTIMPL; 
     proc_cumulative_disk_io->bytes_written = SIGAR_FIELD_NOTIMPL; 
