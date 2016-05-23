@@ -58,7 +58,8 @@ int main() {
 	sigar_t *t;
 	int err = 0;
 	
-	assert(SIGAR_OK == sigar_open(&t));
+	if(SIGAR_OK != sigar_open(&t))
+         assert(0);
 
 	test_sigar_swap_get(t);
 

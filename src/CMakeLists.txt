@@ -80,7 +80,9 @@ ENDIF(CMAKE_SYSTEM_NAME MATCHES "(AIX)" )
 
 IF(WIN32)
   ADD_DEFINITIONS(-DSIGAR_SHARED)
-  SET(SIGAR_SRC os/win32/peb.c os/win32/win32_sigar.c)
+  SET(SIGAR_SRC os/win32/peb.c os/win32/win32_sigar.c os/win32/sigar.rc os/win32/sigar_version.c )
+  SET(SIGAR_SRC1 os/win32/wmi.cpp)
+  set_source_files_properties(os/win32/wmi.cpp PROPERTIES LANGUAGE CXX)
   INCLUDE_DIRECTORIES(os/win32)
   CHECK_STRUCT_MEMBER(MIB_IPADDRROW wType "windows.h;iphlpapi.h" wType_in_MIB_IPADDRROW)
   add_definitions(-DHAVE_MIB_IPADDRROW_WTYPE=${wType_in_MIB_IPADDRROW})
@@ -97,7 +99,7 @@ SET(SIGAR_SRC ${SIGAR_SRC}
   sigar_util.c
 )
 
-ADD_LIBRARY(sigar SHARED ${SIGAR_SRC})
+ADD_LIBRARY(sigar SHARED ${SIGAR_SRC} ${SIGAR_SRC1})
 IF(WIN32)
 	TARGET_LINK_LIBRARIES(sigar ws2_32 netapi32 version)
 ENDIF(WIN32)

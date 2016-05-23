@@ -152,8 +152,10 @@ TEST(test_sigar_file_system_list_get) {
 int main() {
 	sigar_t *t;
 	int err = 0;
+
+	if(SIGAR_OK != sigar_open(&t))
+         assert(0);
 	
-	assert(SIGAR_OK == sigar_open(&t));
 
 	test_sigar_file_system_list_get(t);
 
