@@ -41,6 +41,7 @@ typedef unsigned long long int u_int64_t;
 
 #include <kstat.h>
 #include <procfs.h>
+#include <zone.h>
 
 #include "get_mib2.h"
 
@@ -133,6 +134,12 @@ struct sigar_t {
     int solaris_version;
     int use_ucb_ps;
 
+    int joyent;
+    zoneid_t zoneid;
+    char *zonenm;
+    char *zonenm_short;
+    uint64_t cpu_prev_time, cpu_total;
+
     kstat_ctl_t *kc;
 
     /* kstat_lookup() as needed */
@@ -151,7 +158,7 @@ struct sigar_t {
         int mempages[KSTAT_MEMPAGES_MAX];
         int syspages[KSTAT_SYSPAGES_MAX];
     } koffsets;
-    
+
     int pagesize;
 
     time_t last_getprocs;

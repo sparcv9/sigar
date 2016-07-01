@@ -64,7 +64,7 @@ SIGAR_DECLARE(int) sigar_open(sigar_t **sigar)
         (*sigar)->net_listen = NULL;
         (*sigar)->net_services_tcp = NULL;
         (*sigar)->net_services_udp = NULL;
-	(*sigar)->proc_io = NULL;
+  (*sigar)->proc_io = NULL;
     }
 
     return status;
@@ -242,9 +242,9 @@ SIGAR_DECLARE(int) sigar_proc_disk_io_get(sigar_t *sigar, sigar_pid_t pid,
     if (time_diff < 1000) {
         /* we were just called within < 1 second ago. */
         copy_cached_disk_io_into_disk_io(prev, proc_disk_io);
-	if (time_diff < 0) {
-	   // something is wrong at least from now on the time will be ok
- 	   prev->last_time = time_now;
+  if (time_diff < 0) {
+     // something is wrong at least from now on the time will be ok
+     prev->last_time = time_now;
         }
         return SIGAR_OK;
     }
@@ -280,32 +280,44 @@ SIGAR_DECLARE(int) sigar_dump_pid_cache_get(sigar_t *sigar, sigar_dump_pid_cache
 }
 
 SIGAR_DECLARE(int) sigar_proc_stat_get(sigar_t *sigar,
-                                       sigar_proc_stat_t *procstat)
+  sigar_proc_stat_t *procstat)
 {
-    int status, i;
-    sigar_proc_list_t *pids;
+  int status, i;
+  sigar_proc_list_t *pids;
 
-    SIGAR_ZERO(procstat);
-    procstat->threads = SIGAR_FIELD_NOTIMPL;
+  SIGAR_ZERO(procstat);
+  procstat->threads = SIGAR_FIELD_NOTIMPL;
+  procstat->open_files = SIGAR_FIELD_NOTIMPL;
 
-    if ((status = sigar_proc_list_get(sigar, NULL)) != SIGAR_OK) {
-        return status;
+  if ((status = sigar_proc_list_get(sigar, NULL)) != SIGAR_OK) {
+    return status;
+  }
+
+  pids = sigar->pids;
+  procstat->total = pids->number;
+
+  for (i = 0; i<pids->number; i++) {
+    sigar_proc_state_t state;
+    memset(&state, 0, sizeof(state));
+
+    status = sigar_proc_state_get(sigar, pids->data[i], &state);
+    if (status != SIGAR_OK) {
+      continue;
     }
 
-    pids = sigar->pids;
-    procstat->total = pids->number;
+    if (state.threads != SIGAR_FIELD_NOTIMPL) {
+      if (procstat->threads == SIGAR_FIELD_NOTIMPL)
+        procstat->threads = state.threads;
+      else
+        procstat->threads += state.threads;
+    }
 
-    for (i=0; i<pids->number; i++) {
-        sigar_proc_state_t state;
-
-        status = sigar_proc_state_get(sigar, pids->data[i], &state);
-        if (status != SIGAR_OK) {
-            continue;
-        }
-
-        if (state.threads != SIGAR_FIELD_NOTIMPL) {
-            procstat->threads += state.threads;
-        }
+    if (state.open_files != SIGAR_FIELD_NOTIMPL) {
+      if (procstat->open_files == SIGAR_FIELD_NOTIMPL)
+        procstat->open_files = state.open_files;
+      else
+        procstat->open_files += state.open_files;
+    }
 
         switch (state.state) {
           case SIGAR_PROC_STATE_IDLE:
@@ -851,6 +863,30 @@ sigar_net_connection_list_get(sigar_t *sigar,
 
     return status;
 }
+
+SIGAR_DECLARE(int)
+sigar_net_connection_listeners_get(sigar_t *sigar,
+  sigar_net_connection_list_t *connlist)
+{
+  int status;
+  sigar_net_connection_walker_t walker;
+
+  sigar_net_connection_list_create(connlist);
+
+  walker.sigar = sigar;
+  walker.flags = SIGAR_NETCONN_UDP | SIGAR_NETCONN_TCP | SIGAR_NETCONN_SERVER;
+  walker.data = connlist;
+  walker.add_connection = net_connection_list_walker;
+
+  status = sigar_net_listeners_get(&walker);
+
+  if (status != SIGAR_OK) {
+    sigar_net_connection_list_destroy(sigar, connlist);
+  }
+
+  return status;
+}
+
 #endif
 
 static void sigar_net_listen_address_add(sigar_t *sigar,
@@ -1245,10 +1281,10 @@ SIGAR_DECLARE(int) sigar_resource_limit_get(sigar_t *sigar,
 
     if (VirtualQuery((LPCVOID)&meminfo, &meminfo, sizeof(meminfo))) {
         rlimit->stack_cur =
-            (DWORD)&meminfo - (DWORD)meminfo.AllocationBase;
+            (size_t)&meminfo - (size_t)meminfo.AllocationBase;
         rlimit->stack_max =
-            ((DWORD)meminfo.BaseAddress + meminfo.RegionSize) -
-            (DWORD)meminfo.AllocationBase;
+            ((size_t)meminfo.BaseAddress + meminfo.RegionSize) -
+            (size_t)meminfo.AllocationBase;
     }
 
     rlimit->virtual_memory_max = rlimit->virtual_memory_cur =
@@ -2331,7 +2367,7 @@ SIGAR_DECLARE(char *) sigar_password_get(const char *prompt)
             fflush(stderr);
             return NULL;
         }
-	else if (ch == 27) /* ESC */ {
+  else if (ch == 27) /* ESC */ {
             fputc('\n', stderr);
             fputs(prompt, stderr);
             fflush(stderr);
@@ -2342,7 +2378,7 @@ SIGAR_DECLARE(char *) sigar_password_get(const char *prompt)
             fputc(' ', stderr);
             fflush(stderr);
         }
-	else {
+  else {
             fputc('\a', stderr);
             fflush(stderr);
         }

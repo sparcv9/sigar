@@ -17,11 +17,16 @@ AC_SUBST(VERSION_MAINT)
 AC_SUBST(VERSION_BUILD)
 
 AC_PROG_CC
+AC_PROG_CXX
 AC_PROG_LN_S
 AC_PROG_INSTALL
 AC_PROG_MAKE_SET
 AC_PROG_LIBTOOL
 AC_CONFIG_MACRO_DIR([m4])
+
+m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
+
+CFLAGS="$CFLAGS -Wall"
 
 AC_MSG_CHECKING([for os type ($host_os)])
 FRAMEWORK=
@@ -61,6 +66,7 @@ case $host_os in
      *linux*)
      SRC_OS="linux"
      AC_DEFINE(SIGAR_TEST_OS_LINUX, [1], [for the tests])
+     CFLAGS="$CFLAGS -D_DEFAULT_SOURCE -D_GNU_SOURCE"
      ;;
      *solaris*)
      AC_DEFINE(SOLARIS,[],[running on Solaris])
@@ -73,10 +79,12 @@ case $host_os in
 esac
 AC_MSG_RESULT([$SRC_OS])
 
-AC_CHECK_HEADERS(utmp.h utmpx.h libproc.h valgrind/valgrind.h)
+AC_CHECK_HEADERS(utmp.h utmpx.h libproc.h valgrind/valgrind.h libdlpi.h rpc/rpc.h)
 if test $ac_cv_header_libproc_h = yes; then
         AC_DEFINE(DARWIN_HAS_LIBPROC_H, [1], [sigar named them DARWIN_HAS_... instead of HAVE_])
 fi
+
+AC_SEARCH_LIBS(dlpi_open, dlpi)
 
 INCLUDES="-I\$(top_srcdir)/include -I\$(top_srcdir)/src/os/$SRC_OS $SIGAR_INCLUDES"
 

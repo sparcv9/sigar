@@ -20,10 +20,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <linux/param.h>
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/times.h>
 #include <sys/utsname.h>
+#include <mntent.h>
 
 #include "sigar.h"
 #include "sigar_private.h"
@@ -32,19 +34,37 @@
 
 #define pageshift(x) ((x) << sigar->pagesize)
 
-#define PROC_MEMINFO PROC_FS_ROOT "meminfo"
-#define PROC_VMSTAT  PROC_FS_ROOT "vmstat"
-#define PROC_MTRR    PROC_FS_ROOT "mtrr"
-#define PROC_STAT    PROC_FS_ROOT "stat"
-#define PROC_UPTIME  PROC_FS_ROOT "uptime"
-#define PROC_LOADAVG PROC_FS_ROOT "loadavg"
-
 #define PROC_PSTAT   "/stat"
 #define PROC_PSTATUS "/status"
 
-#define SYS_BLOCK "/sys/block"
-#define PROC_PARTITIONS PROC_FS_ROOT "partitions"
-#define PROC_DISKSTATS  PROC_FS_ROOT "diskstats"
+static char *gPROC_FS_ROOT;
+static char *gPROCP_FS_ROOT;
+static char *gPROC_MEMINFO;
+static char *gPROC_VMSTAT;
+static char *gPROC_MTRR;
+static char *gPROC_STAT;
+static char *gPROC_UPTIME;
+static char *gPROC_LOADAVG;
+static char *gSYS_BLOCK;
+static char *gPROC_PARTITIONS;
+static char *gPROC_DISKSTATS;
+static char *gMOUNTED;
+
+static void set_proc_locations()
+{
+	sigar_proc_path(&gPROC_FS_ROOT,    PROC_FS_ROOT, NULL);
+	sigar_proc_path(&gPROCP_FS_ROOT,   PROCP_FS_ROOT, NULL);
+	sigar_proc_path(&gPROC_MEMINFO,    PROC_FS_ROOT, "meminfo");
+	sigar_proc_path(&gPROC_VMSTAT,     PROC_FS_ROOT, "vmstat");
+	sigar_proc_path(&gPROC_MTRR,       PROC_FS_ROOT, "mtrr");
+	sigar_proc_path(&gPROC_STAT,       PROC_FS_ROOT, "stat");
+	sigar_proc_path(&gPROC_UPTIME,     PROC_FS_ROOT, "uptime");
+	sigar_proc_path(&gPROC_LOADAVG,    PROC_FS_ROOT, "loadavg");
+	sigar_proc_path(&gPROC_DISKSTATS,  PROC_FS_ROOT, "diskstats");
+	sigar_proc_path(&gPROC_PARTITIONS, PROC_FS_ROOT, "partitions");
+	sigar_proc_path(&gSYS_BLOCK,       NULL,         "/sys/block");
+	sigar_proc_path(&gMOUNTED,         NULL,         MOUNTED);
+}
 
 /*
  * /proc/self/stat fields:
@@ -128,7 +148,7 @@ static int sigar_boot_time_get(sigar_t *sigar)
     char buffer[BUFSIZ], *ptr;
     int found = 0;
 
-    if (!(fp = fopen(PROC_STAT, "r"))) {
+    if (!(fp = fopen(gPROC_STAT, "r"))) {
         return errno;
     }
 
@@ -159,6 +179,8 @@ int sigar_os_open(sigar_t **sigar)
     struct stat sb;
     struct utsname name;
 
+    set_proc_locations();
+
     *sigar = malloc(sizeof(**sigar));
 
     (*sigar)->pagesize = 0;
@@ -171,7 +193,7 @@ int sigar_os_open(sigar_t **sigar)
     if (status != SIGAR_OK) {
         return status;
     }
-    
+
     (*sigar)->ticks = sysconf(_SC_CLK_TCK);
 
     (*sigar)->ram = -1;
@@ -182,13 +204,13 @@ int sigar_os_open(sigar_t **sigar)
 
     (*sigar)->lcpu = -1;
 
-    if (stat(PROC_DISKSTATS, &sb) == 0) {
+    if (stat(gPROC_DISKSTATS, &sb) == 0) {
         (*sigar)->iostat = IOSTAT_DISKSTATS;
     }
-    else if (stat(SYS_BLOCK, &sb) == 0) {
+    else if (stat(gSYS_BLOCK, &sb) == 0) {
         (*sigar)->iostat = IOSTAT_SYS;
     }
-    else if (stat(PROC_PARTITIONS, &sb) == 0) {
+    else if (stat(gPROC_PARTITIONS, &sb) == 0) {
         /* XXX file exists does not mean is has the fields */
         (*sigar)->iostat = IOSTAT_PARTITIONS;
     }
@@ -256,7 +278,7 @@ static int get_ram(sigar_t *sigar, sigar_mem_t *mem)
      * at least one configuration where that is not the
      * case.
      */
-    if (!(fp = fopen(PROC_MTRR, "r"))) {
+    if (!(fp = fopen(gPROC_MTRR, "r"))) {
         return errno;
     }
 
@@ -289,7 +311,7 @@ static int get_ram(sigar_t *sigar, sigar_mem_t *mem)
     if (total == 0) {
         return ENOENT;
     }
- 
+
     mem->ram = sigar->ram = total;
 
     return SIGAR_OK;
@@ -325,7 +347,7 @@ int sigar_mem_get(sigar_t *sigar, sigar_mem_t *mem)
     sigar_uint64_t buffers, cached, available, kern;
     char buffer[BUFSIZ];
 
-    int status = sigar_file2str(PROC_MEMINFO,
+    int status = sigar_file2str(gPROC_MEMINFO,
                                 buffer, sizeof(buffer));
 
     if (status != SIGAR_OK) {
@@ -363,7 +385,7 @@ int sigar_swap_get(sigar_t *sigar, sigar_swap_t *swap)
     char buffer[BUFSIZ], *ptr;
 
     /* XXX: we open/parse the same file here as sigar_mem_get */
-    int status = sigar_file2str(PROC_MEMINFO,
+    int status = sigar_file2str(gPROC_MEMINFO,
                                 buffer, sizeof(buffer));
 
     if (status != SIGAR_OK) {
@@ -376,7 +398,7 @@ int sigar_swap_get(sigar_t *sigar, sigar_swap_t *swap)
 
     swap->page_in = swap->page_out = -1;
 
-    status = sigar_file2str(PROC_VMSTAT,
+    status = sigar_file2str(gPROC_VMSTAT,
                             buffer, sizeof(buffer));
 
     if (status == SIGAR_OK) {
@@ -390,7 +412,7 @@ int sigar_swap_get(sigar_t *sigar, sigar_swap_t *swap)
     }
     else {
         /* 2.2, 2.4 kernels */
-        status = sigar_file2str(PROC_STAT,
+        status = sigar_file2str(gPROC_STAT,
                                 buffer, sizeof(buffer));
         if (status != SIGAR_OK) {
             return status;
@@ -432,7 +454,7 @@ static void get_cpu_metrics(sigar_t *sigar, sigar_cpu_t *cpu, char *line)
 int sigar_cpu_get(sigar_t *sigar, sigar_cpu_t *cpu)
 {
     char buffer[BUFSIZ];
-    int status = sigar_file2str(PROC_STAT, buffer, sizeof(buffer));
+    int status = sigar_file2str(gPROC_STAT, buffer, sizeof(buffer));
 
     if (status != SIGAR_OK) {
         return status;
@@ -451,12 +473,18 @@ int sigar_cpu_list_get(sigar_t *sigar, sigar_cpu_list_t *cpulist)
     int core_rollup = sigar_cpu_core_rollup(sigar), i=0;
     sigar_cpu_t *cpu;
 
-    if (!(fp = fopen(PROC_STAT, "r"))) {
+    if (!(fp = fopen(gPROC_STAT, "r"))) {
         return errno;
     }
 
     /* skip first line */
-    (void)fgets(cpu_total, sizeof(cpu_total), fp);
+
+    int result = sigar_skip_file_lines(fp, 1);
+    if (result != SIGAR_OK)
+    {
+        fclose(fp);
+        return -1;
+    }
 
     sigar_cpu_list_create(cpulist);
 
@@ -481,14 +509,14 @@ int sigar_cpu_list_get(sigar_t *sigar, sigar_cpu_list_t *cpulist)
         i++;
     }
 
-    fclose(fp);
-
     if (cpulist->number == 0) {
         /* likely older kernel where cpu\d is not present */
         cpu = &cpulist->data[cpulist->number++];
         SIGAR_ZERO(cpu);
         get_cpu_metrics(sigar, cpu, cpu_total);
     }
+
+    fclose(fp);
 
     return SIGAR_OK;
 }
@@ -497,7 +525,7 @@ int sigar_uptime_get(sigar_t *sigar,
                      sigar_uptime_t *uptime)
 {
     char buffer[BUFSIZ], *ptr = buffer;
-    int status = sigar_file2str(PROC_UPTIME, buffer, sizeof(buffer));
+    int status = sigar_file2str(gPROC_UPTIME, buffer, sizeof(buffer));
 
     if (status != SIGAR_OK) {
         return status;
@@ -512,15 +540,50 @@ int sigar_loadavg_get(sigar_t *sigar,
                       sigar_loadavg_t *loadavg)
 {
     char buffer[BUFSIZ], *ptr = buffer;
-    int status = sigar_file2str(PROC_LOADAVG, buffer, sizeof(buffer));
+    int status = sigar_file2str(gPROC_LOADAVG, buffer, sizeof(buffer));
 
     if (status != SIGAR_OK) {
         return status;
     }
 
+    loadavg->loadavg_result[0] = loadavg->loadavg_result[1] = loadavg->loadavg_result[2] = 0;
     loadavg->loadavg[0] = strtod(buffer, &ptr);
     loadavg->loadavg[1] = strtod(ptr, &ptr);
     loadavg->loadavg[2] = strtod(ptr, &ptr);
+    loadavg->processor_queue = strtod(ptr, &ptr);
+
+    return SIGAR_OK;
+}
+
+int sigar_system_stats_get (sigar_t *sigar,
+                            sigar_system_stats_t *system_stats)
+{
+    FILE *fp;
+    char buffer[BUFSIZ], *ptr;
+
+    if (!(fp = fopen(gPROC_STAT, "r"))) {
+        return errno;
+    }
+
+    /* Find the context switches, interrupts, and soft interrupts */
+
+    while ((ptr = fgets(buffer, sizeof(buffer), fp))) {
+        if (strnEQ(ptr, "ctxt", 4)) {
+            ptr = sigar_skip_token(ptr);
+            system_stats->ctxt_switches = sigar_strtoull(ptr);
+        }
+        else if (strnEQ(ptr, "intr", 4)) {
+            ptr = sigar_skip_token(ptr);
+            system_stats->irq = sigar_strtoull(ptr);
+        }
+        else if (strnEQ(ptr, "softirq", 7)) {
+            ptr = sigar_skip_token(ptr);
+            system_stats->soft_irq = sigar_strtoull(ptr);
+        }
+
+    }
+
+    fclose(fp);
 
     return SIGAR_OK;
 }
@@ -545,8 +608,8 @@ static SIGAR_INLINE int proc_isthread(sigar_t *sigar, char *pidstr, int len)
     int fd, n, offset=sigar->proc_signal_offset;
 
     /* sprintf(buffer, "/proc/%s/stat", pidstr) */
-    memcpy(ptr, PROCP_FS_ROOT, SSTRLEN(PROCP_FS_ROOT));
-    ptr += SSTRLEN(PROCP_FS_ROOT);
+    memcpy(ptr, gPROCP_FS_ROOT, SSTRLEN(gPROCP_FS_ROOT));
+    ptr += SSTRLEN(gPROCP_FS_ROOT);
 
     memcpy(ptr, pidstr, len);
     ptr += len;
@@ -608,7 +671,7 @@ static SIGAR_INLINE int proc_isthread(sigar_t *sigar, char *pidstr, int len)
 int sigar_os_proc_list_get(sigar_t *sigar,
                            sigar_proc_list_t *proclist)
 {
-    DIR *dirp = opendir(PROCP_FS_ROOT);
+    DIR *dirp = opendir(gPROCP_FS_ROOT);
     struct dirent *ent, dbuf;
     register const int threadbadhack = !sigar->has_nptl;
 
@@ -657,7 +720,7 @@ static int proc_stat_read(sigar_t *sigar, sigar_pid_t pid)
 
     time_t timenow = time(NULL);
 
-    /* 
+    /*
      * short-lived cache read/parse of last /proc/pid/stat
      * as this info is spread out across a few functions.
      */
@@ -760,7 +823,7 @@ int sigar_proc_mem_get(sigar_t *sigar, sigar_pid_t pid,
     procmem->major_faults = pstat->major_faults;
     procmem->page_faults =
         procmem->minor_faults + procmem->major_faults;
-    
+
     status = SIGAR_PROC_FILE2STR(buffer, pid, "/statm");
 
     if (status != SIGAR_OK) {
@@ -788,9 +851,9 @@ int sigar_proc_cumulative_disk_io_get(sigar_t *sigar, sigar_pid_t pid,
                            sigar_proc_cumulative_disk_io_t *proc_cumulative_disk_io)
 {
     char buffer[BUFSIZ];
-    
+
     int status = SIGAR_PROC_FILE2STR(buffer, pid, "/io");
-    
+
     if (status != SIGAR_OK) {
         return status;
     }
@@ -900,7 +963,22 @@ int sigar_proc_state_get(sigar_t *sigar, sigar_pid_t pid,
         return status;
     }
 
-    memcpy(procstate->name, pstat->name, sizeof(procstate->name));
+    /*
+     * the normal Linux proc name truncates at 15 characters. If we see a 15
+     * character filename, assume it is truncated and attempt to extract the
+     * full name from the process arguments.
+     */
+    memset(procstate->name, 0, sizeof(procstate->name));
+    const char *procname = pstat->name;
+    if (strlen(pstat->name) == 15) {
+        sigar_proc_args_t procargs = { 0 };
+        if (sigar_procfs_args_get(sigar, pid, &procargs) == SIGAR_OK &&
+                procargs.number >= 1) {
+            procname = procargs.data[0];
+        }
+    }
+    strncpy(procstate->name, procname, sizeof(procstate->name) - 1);
+
     procstate->state = pstat->state;
 
     procstate->ppid     = pstat->ppid;
@@ -914,6 +992,15 @@ int sigar_proc_state_get(sigar_t *sigar, sigar_pid_t pid,
     }
 
     proc_status_get(sigar, pid, procstate);
+
+    sigar_proc_fd_t proc_fd_count;
+
+    proc_fd_count.total = SIGAR_FIELD_NOTIMPL;
+
+    status = sigar_proc_fd_get(sigar, pid, &proc_fd_count );
+
+    if(status == SIGAR_OK)
+        procstate->open_files = proc_fd_count.total;
 
     return SIGAR_OK;
 }
@@ -1074,7 +1161,7 @@ int sigar_proc_modules_get(sigar_t *sigar, sigar_pid_t pid,
             break;
         }
     }
-    
+
     fclose(fp);
 
     return SIGAR_OK;
@@ -1098,8 +1185,6 @@ int sigar_thread_cpu_get(sigar_t *sigar,
 
     return SIGAR_OK;
 }
-
-#include <mntent.h>
 
 int sigar_os_fs_type_get(sigar_file_system_t *fsp)
 {
@@ -1164,7 +1249,7 @@ int sigar_file_system_list_get(sigar_t *sigar,
     FILE *fp;
     sigar_file_system_t *fsp;
 
-    if (!(fp = setmntent(MOUNTED, "r"))) {
+    if (!(fp = setmntent(gMOUNTED, "r"))) {
         return errno;
     }
 
@@ -1200,6 +1285,10 @@ static int get_iostat_sys(sigar_t *sigar,
     char *name, *ptr, *fsdev;
     int partition, status;
 
+    if (SIGAR_LOG_IS_TRACE(sigar)) {
+        sigar_log_printf(sigar, SIGAR_LOG_TRACE, "get_iostat_sys ingress : %s", dirname);
+    }
+
     if (!(*iodev = sigar_iodev_get(sigar, dirname))) {
         return ENXIO;
     }
@@ -1217,8 +1306,7 @@ static int get_iostat_sys(sigar_t *sigar,
     partition = strtoul(fsdev, NULL, 0);
     *fsdev = '\0';
 
-    snprintf(stat, sizeof(stat),
-             SYS_BLOCK "/%s/%s%d/stat", name, name, partition);
+    snprintf(stat, sizeof(stat), "%s/%s/%s%d/stat", gSYS_BLOCK, name, name, partition);
 
     status = sigar_file2str(stat, dev, sizeof(dev));
     if (status != SIGAR_OK) {
@@ -1250,6 +1338,10 @@ static int get_iostat_proc_dstat(sigar_t *sigar,
     struct stat sb;
     int status=ENOENT;
 
+    if (SIGAR_LOG_IS_TRACE(sigar)) {
+        sigar_log_printf(sigar, SIGAR_LOG_TRACE, "get_iostat_proc_dstat ingress : %s", dirname);
+    }
+
     SIGAR_DISK_STATS_INIT(device_usage);
 
     if (!(*iodev = sigar_iodev_get(sigar, dirname))) {
@@ -1262,12 +1354,16 @@ static int get_iostat_proc_dstat(sigar_t *sigar,
 
     if (SIGAR_LOG_IS_DEBUG(sigar)) {
         sigar_log_printf(sigar, SIGAR_LOG_DEBUG,
-                         PROC_DISKSTATS " %s -> %s [%d,%d]",
-                         dirname, (*iodev)->name,
-                         ST_MAJOR(sb), ST_MINOR(sb));
+            "%s  %s -> %s [%d,%d]",
+			gPROC_DISKSTATS,
+            dirname, (*iodev)->name,
+            ST_MAJOR(sb), ST_MINOR(sb));
     }
 
-    if (!(fp = fopen(PROC_DISKSTATS, "r"))) {
+    if (!(fp = fopen(gPROC_DISKSTATS, "r"))) {
+        if (SIGAR_LOG_IS_TRACE(sigar)) {
+            sigar_log_printf(sigar, SIGAR_LOG_TRACE, "FOPEN %s failed: %s", gPROC_DISKSTATS);
+        }
         return errno;
     }
 
@@ -1287,6 +1383,10 @@ static int get_iostat_proc_dstat(sigar_t *sigar,
                 running, use, aveq;
 
             ptr = sigar_skip_token(ptr); /* name */
+
+            if (SIGAR_LOG_IS_TRACE(sigar)) {
+                sigar_log_printf(sigar, SIGAR_LOG_TRACE, "Scanning diskdata");
+            }
 
             num = sscanf(ptr,
                          "%lu %lu %lu %lu "
@@ -1309,6 +1409,7 @@ static int get_iostat_proc_dstat(sigar_t *sigar,
                 disk->wtime = wuse;
                 disk->time = use;
                 disk->qtime = aveq;
+                disk->ios = running;
             }
             else if (num == 4) {
                 wio = rsect;
@@ -1354,6 +1455,10 @@ static int get_iostat_procp(sigar_t *sigar,
     char *ptr;
     struct stat sb;
 
+    if (SIGAR_LOG_IS_TRACE(sigar)) {
+        sigar_log_printf(sigar, SIGAR_LOG_TRACE, "get_iostat_procp ingress : %s", dirname);
+    }
+
     if (!(*iodev = sigar_iodev_get(sigar, dirname))) {
         return ENXIO;
     }
@@ -1364,16 +1469,25 @@ static int get_iostat_procp(sigar_t *sigar,
 
     if (SIGAR_LOG_IS_DEBUG(sigar)) {
         sigar_log_printf(sigar, SIGAR_LOG_DEBUG,
-                         PROC_PARTITIONS " %s -> %s [%d,%d]",
+                         "%s %s -> %s [%d,%d]",
+                         gPROC_PARTITIONS,
                          dirname, (*iodev)->name,
                          ST_MAJOR(sb), ST_MINOR(sb));
     }
 
-    if (!(fp = fopen(PROC_PARTITIONS, "r"))) {
+    if (!(fp = fopen(gPROC_PARTITIONS, "r"))) {
         return errno;
     }
 
-    (void)fgets(buffer, sizeof(buffer), fp); /* skip header */
+    /* skip header */
+
+    int result = sigar_skip_file_lines(fp, 1);
+    if (result != SIGAR_OK)
+    {
+        fclose(fp);
+        return -1;
+    }
+
     while ((ptr = fgets(buffer, sizeof(buffer), fp))) {
         unsigned long major, minor;
 
@@ -1384,11 +1498,11 @@ static int get_iostat_procp(sigar_t *sigar,
             ptr = sigar_skip_token(ptr); /* blocks */
             ptr = sigar_skip_token(ptr); /* name */
             disk->reads = sigar_strtoull(ptr); /* rio */
-            ptr = sigar_skip_token(ptr);  /* rmerge */ 
+            ptr = sigar_skip_token(ptr);  /* rmerge */
             disk->read_bytes  = sigar_strtoull(ptr); /* rsect */
             disk->rtime = sigar_strtoull(ptr); /* ruse */
             disk->writes = sigar_strtoull(ptr); /* wio */
-            ptr = sigar_skip_token(ptr);  /* wmerge */ 
+            ptr = sigar_skip_token(ptr);  /* wmerge */
             disk->write_bytes = sigar_strtoull(ptr); /* wsect */
             disk->wtime = sigar_strtoull(ptr); /* wuse */
             ptr = sigar_skip_token(ptr); /* running */
@@ -1416,6 +1530,10 @@ int sigar_disk_usage_get(sigar_t *sigar, const char *name,
     sigar_iodev_t *iodev = NULL;
     sigar_disk_usage_t device_usage;
     SIGAR_DISK_STATS_INIT(disk);
+
+    if (SIGAR_LOG_IS_TRACE(sigar)) {
+        sigar_log_printf(sigar, SIGAR_LOG_TRACE, "sigar_disk_usage_get ingress : %s", name);
+    }
 
     /*
      * 2.2 has metrics /proc/stat, but wtf is the device mapping?
@@ -1503,6 +1621,10 @@ int sigar_file_system_usage_get(sigar_t *sigar,
                                 const char *dirname,
                                 sigar_file_system_usage_t *fsusage)
 {
+    if (SIGAR_LOG_IS_TRACE(sigar)) {
+        sigar_log_printf(sigar, SIGAR_LOG_TRACE, "sigar_file_system_usage_get ingress : %s", dirname);
+    }
+
     int status = sigar_statvfs(sigar, dirname, fsusage);
 
     if (status != SIGAR_OK) {
@@ -1547,6 +1669,13 @@ static int get_cpu_info(sigar_t *sigar, sigar_cpu_info_t *info,
     char buffer[BUFSIZ], *ptr;
 
     int found = 0;
+
+	/*
+	 * Make sure we don't put trash in here if we can't find
+	 * the field keywords.
+	 */
+
+	memset(info, 0, sizeof(*info));
 
     /* UML vm wont have "cpu MHz" or "cache size" fields */
     info->mhz        = 0;
@@ -1665,8 +1794,11 @@ int sigar_cpu_info_list_get(sigar_t *sigar,
 {
     FILE *fp;
     int core_rollup = sigar_cpu_core_rollup(sigar), i=0;
+    static char *cpu_info_path;
 
-    if (!(fp = fopen(PROC_FS_ROOT "cpuinfo", "r"))) {
+    sigar_proc_path(&cpu_info_path,  PROC_FS_ROOT, "cpuinfo");
+
+    if (!(fp = fopen(cpu_info_path, "r"))) {
         return errno;
     }
 
@@ -1736,16 +1868,28 @@ int sigar_net_route_list_get(sigar_t *sigar,
     char net_addr[128], gate_addr[128], mask_addr[128];
     int flags;
     sigar_net_route_t *route;
+    static char *route_path;
+
+    sigar_proc_path(&route_path,  PROC_FS_ROOT, "net/route");
 
     routelist->size = routelist->number = 0;
 
-    if (!(fp = fopen(PROC_FS_ROOT "net/route", "r"))) {
+    if (!(fp = fopen(route_path, "r"))) {
         return errno;
     }
 
     sigar_net_route_list_create(routelist);
 
-    (void)fgets(buffer, sizeof(buffer), fp); /* skip header */
+    /* skip heaader */
+
+    int result = sigar_skip_file_lines(fp, 1);
+
+    if (result != SIGAR_OK)
+    {
+        fclose(fp);
+        return -1;
+    }
+
     while (fgets(buffer, sizeof(buffer), fp)) {
         int num;
 
@@ -1765,7 +1909,7 @@ int sigar_net_route_list_get(sigar_t *sigar,
         }
 
         route->flags = flags;
-        
+
         sigar_net_address_set(route->destination, hex2int(net_addr, HEX_ENT_LEN));
         sigar_net_address_set(route->gateway, hex2int(gate_addr, HEX_ENT_LEN));
         sigar_net_address_set(route->mask, hex2int(mask_addr, HEX_ENT_LEN));
@@ -1776,20 +1920,61 @@ int sigar_net_route_list_get(sigar_t *sigar,
     return SIGAR_OK;
 }
 
+static SIGAR_INLINE char *nic_speed_filename(char *buf,
+                                             int buflen,
+                                             const char *nic)
+{
+    if (snprintf(buf, buflen, "/sys/class/net/%s/speed", nic) < buflen) {
+        return buf;
+    }
+
+    return NULL;
+}
+
+static SIGAR_INLINE int nic_speed_get(const char *name)
+{
+    char buffer[BUFSIZ];
+    const char *fname = nic_speed_filename(buffer, BUFSIZ, name);
+
+    if (fname) {
+        FILE *fp = fopen(fname, "r");
+
+        if (fp) {
+            int speed;
+            int n = fscanf(fp, "%d", &speed);
+
+            fclose(fp);
+            return n == 1 ? speed : SIGAR_FIELD_NOTIMPL;
+        }
+    }
+
+    return SIGAR_FIELD_NOTIMPL;
+}
+
 int sigar_net_interface_stat_get(sigar_t *sigar, const char *name,
                                  sigar_net_interface_stat_t *ifstat)
 {
     int found = 0;
     char buffer[BUFSIZ];
-    FILE *fp = fopen(PROC_FS_ROOT "net/dev", "r");
-    
+    static char *net_dev_path;
+
+    sigar_proc_path(&net_dev_path,  PROC_FS_ROOT, "net/dev");
+
+    FILE *fp = fopen(net_dev_path, "r");
+
     if (!fp) {
         return errno;
     }
 
-    /* skip header */
-    fgets(buffer, sizeof(buffer), fp);
-    fgets(buffer, sizeof(buffer), fp);
+    /* skip headers */
+
+	int result = sigar_skip_file_lines(fp, 2);
+
+    if (result != SIGAR_OK)
+    {
+        fclose(fp);
+        return -1;
+    }
 
     while (fgets(buffer, sizeof(buffer), fp)) {
         char *ptr, *dev;
@@ -1828,7 +2013,7 @@ int sigar_net_interface_stat_get(sigar_t *sigar, const char *name,
         ifstat->tx_collisions = sigar_strtoull(ptr);
         ifstat->tx_carrier    = sigar_strtoull(ptr);
 
-        ifstat->speed         = SIGAR_FIELD_NOTIMPL;
+        ifstat->speed         = nic_speed_get(name);
 
         break;
     }
@@ -1933,7 +2118,7 @@ static int proc_net_read(sigar_net_connection_walker_t *walker,
     if (ptr) {
         snprintf(buffer, sizeof(buffer),
                  "%s/%s", ptr,
-                 fname + sizeof(PROC_FS_ROOT)-1);
+                 fname + sizeof(gPROC_FS_ROOT)-1);
 
         if ((fp = xproc_open(buffer, &xproc))) {
             if (SIGAR_LOG_IS_DEBUG(sigar)) {
@@ -1953,7 +2138,13 @@ static int proc_net_read(sigar_net_connection_walker_t *walker,
         return errno;
     }
 
-    fgets(buffer, sizeof(buffer), fp); /* skip header */
+    int result = sigar_skip_file_lines(fp, 1);
+
+    if (result != SIGAR_OK)
+    {
+        fclose(fp);
+        return -1;
+    }
 
     while ((ptr = fgets(buffer, sizeof(buffer), fp))) {
         sigar_net_connection_t conn;
@@ -2041,10 +2232,22 @@ int sigar_net_connection_walk(sigar_net_connection_walker_t *walker)
 {
     int flags = walker->flags;
     int status;
+    static char *tcp_path;
+    static char *tcp6_path;
+    static char *udp_path;
+    static char *udp6_path;
+    static char *raw_path;
+    static char *raw6_path;
+
+    sigar_proc_path(&tcp_path,  PROC_FS_ROOT, "net/tcp");
+    sigar_proc_path(&tcp6_path, PROC_FS_ROOT, "net/tcp6");
+    sigar_proc_path(&udp_path,  PROC_FS_ROOT, "net/udp");
+    sigar_proc_path(&udp6_path, PROC_FS_ROOT, "net/udp6");
+    sigar_proc_path(&raw_path,  PROC_FS_ROOT, "net/raw");
+    sigar_proc_path(&raw6_path, PROC_FS_ROOT, "net/raw6");
 
     if (flags & SIGAR_NETCONN_TCP) {
-        status = proc_net_read(walker,
-                               PROC_FS_ROOT "net/tcp",
+        status = proc_net_read(walker, tcp_path,
                                SIGAR_NETCONN_TCP);
 
         if (status != SIGAR_OK) {
@@ -2052,7 +2255,7 @@ int sigar_net_connection_walk(sigar_net_connection_walker_t *walker)
         }
 
         status = proc_net_read(walker,
-                               PROC_FS_ROOT "net/tcp6",
+                               tcp6_path,
                                SIGAR_NETCONN_TCP);
 
         if (!((status == SIGAR_OK) || (status == ENOENT))) {
@@ -2062,7 +2265,7 @@ int sigar_net_connection_walk(sigar_net_connection_walker_t *walker)
 
     if (flags & SIGAR_NETCONN_UDP) {
         status = proc_net_read(walker,
-                               PROC_FS_ROOT "net/udp",
+                               udp_path,
                                SIGAR_NETCONN_UDP);
 
         if (status != SIGAR_OK) {
@@ -2070,7 +2273,7 @@ int sigar_net_connection_walk(sigar_net_connection_walker_t *walker)
         }
 
         status = proc_net_read(walker,
-                               PROC_FS_ROOT "net/udp6",
+                               udp6_path,
                                SIGAR_NETCONN_UDP);
 
         if (!((status == SIGAR_OK) || (status == ENOENT))) {
@@ -2080,15 +2283,15 @@ int sigar_net_connection_walk(sigar_net_connection_walker_t *walker)
 
     if (flags & SIGAR_NETCONN_RAW) {
         status = proc_net_read(walker,
-                               PROC_FS_ROOT "net/raw",
+                               raw_path,
                                SIGAR_NETCONN_RAW);
-        
+
         if (status != SIGAR_OK) {
             return status;
         }
 
         status = proc_net_read(walker,
-                               PROC_FS_ROOT "net/raw6",
+                               raw6_path,
                                SIGAR_NETCONN_RAW);
 
         if (!((status == SIGAR_OK) || (status == ENOENT))) {
@@ -2158,8 +2361,11 @@ int sigar_net_interface_ipv6_config_get(sigar_t *sigar, const char *name,
     char addr[32+1], ifname[8+1];
     int status = SIGAR_ENOENT;
     int idx, prefix, scope, flags;
+    static char *if_inet6_path;
 
-    if (!(fp = fopen(PROC_FS_ROOT "net/if_inet6", "r"))) {
+    sigar_proc_path(&if_inet6_path,  PROC_FS_ROOT, "net/if_inet6");
+
+    if (!(fp = fopen(if_inet6_path, "r"))) {
         return errno;
     }
 
@@ -2190,6 +2396,34 @@ int sigar_net_interface_ipv6_config_get(sigar_t *sigar, const char *name,
     return status;
 }
 
+SIGAR_DECLARE(int)
+sigar_net_connection_listeners_get(sigar_t *sigar,
+		sigar_net_connection_list_t *connlist)
+{
+
+    int i, status;
+
+    status = sigar_net_connection_list_get(sigar, connlist,
+			SIGAR_NETCONN_UDP | SIGAR_NETCONN_TCP | SIGAR_NETCONN_SERVER);
+
+    if (status != SIGAR_OK) {
+        return status;
+    }
+
+    sigar_pid_t pid;
+
+    for (i = 0; i < connlist->number; i++) {
+        status = sigar_proc_port_get(sigar, SIGAR_NETCONN_TCP | SIGAR_NETCONN_UDP,
+            connlist->data[i].local_port, &pid);
+
+        if (status == SIGAR_OK) {
+            connlist->data[i].pid = pid;
+        }
+    }
+
+    return SIGAR_OK;
+}
+
 #define SNMP_TCP_PREFIX "Tcp: "
 
 SIGAR_DECLARE(int)
@@ -2199,8 +2433,11 @@ sigar_tcp_get(sigar_t *sigar,
     FILE *fp;
     char buffer[1024], *ptr=buffer;
     int status = SIGAR_ENOENT;
+	static char *snmp_path;
 
-    if (!(fp = fopen(PROC_FS_ROOT "net/snmp", "r"))) {
+	sigar_proc_path(&snmp_path,  PROC_FS_ROOT, "net/snmp");
+
+    if (!(fp = fopen(snmp_path, "r"))) {
         return errno;
     }
 
@@ -2216,7 +2453,7 @@ sigar_tcp_get(sigar_t *sigar,
     fclose(fp);
 
     if (status == SIGAR_OK) {
-        /* assuming field order, same in 2.2, 2.4 and 2.6 kernels */ 
+        /* assuming field order, same in 2.2, 2.4 and 2.6 kernels */
         /* Tcp: RtoAlgorithm RtoMin RtoMax MaxConn */
         ptr = sigar_skip_multiple_token(ptr, 5);
         tcp->active_opens = sigar_strtoull(ptr);
@@ -2240,7 +2477,7 @@ static int sigar_proc_nfs_gets(char *file, char *tok,
     int status = ENOENT;
     int len = strlen(tok);
     FILE *fp = fopen(file, "r");
-    
+
     if (!fp) {
         return SIGAR_ENOTIMPL;
     }
@@ -2295,15 +2532,21 @@ static int sigar_nfs_v2_get(char *file, sigar_nfs_v2_t *nfs)
 int sigar_nfs_client_v2_get(sigar_t *sigar,
                             sigar_nfs_client_v2_t *nfs)
 {
-    return sigar_nfs_v2_get(PROC_FS_ROOT "net/rpc/nfs",
-                            (sigar_nfs_v2_t *)nfs);
+    static char *nfs_path;
+
+    sigar_proc_path(&nfs_path,  PROC_FS_ROOT, "net/rpc/nfs");
+
+    return sigar_nfs_v2_get(nfs_path, (sigar_nfs_v2_t *)nfs);
 }
 
 int sigar_nfs_server_v2_get(sigar_t *sigar,
                             sigar_nfs_server_v2_t *nfs)
 {
-    return sigar_nfs_v2_get(PROC_FS_ROOT "net/rpc/nfsd",
-                            (sigar_nfs_v2_t *)nfs);
+    static char *nfsd_path;
+
+    sigar_proc_path(&nfsd_path,  PROC_FS_ROOT, "net/rpc/nfsd");
+
+    return sigar_nfs_v2_get(nfsd_path, (sigar_nfs_v2_t *)nfs);
 }
 
 static int sigar_nfs_v3_get(char *file, sigar_nfs_v3_t *nfs)
@@ -2348,15 +2591,21 @@ static int sigar_nfs_v3_get(char *file, sigar_nfs_v3_t *nfs)
 int sigar_nfs_client_v3_get(sigar_t *sigar,
                             sigar_nfs_client_v3_t *nfs)
 {
-    return sigar_nfs_v3_get(PROC_FS_ROOT "net/rpc/nfs",
-                            (sigar_nfs_v3_t *)nfs);
+	static char *nfs_path;
+
+	sigar_proc_path(&nfs_path,  PROC_FS_ROOT, "net/rpc/nfs");
+
+    return sigar_nfs_v3_get(nfs_path, (sigar_nfs_v3_t *)nfs);
 }
 
 int sigar_nfs_server_v3_get(sigar_t *sigar,
                             sigar_nfs_server_v3_t *nfs)
 {
-    return sigar_nfs_v3_get(PROC_FS_ROOT "net/rpc/nfsd",
-                            (sigar_nfs_v3_t *)nfs);
+	static char *nfsd_path;
+
+	sigar_proc_path(&nfsd_path,  PROC_FS_ROOT, "net/rpc/nfsd");
+
+    return sigar_nfs_v3_get(nfsd_path, (sigar_nfs_v3_t *)nfs);
 }
 
 #include <net/if_arp.h>
@@ -2425,16 +2674,28 @@ int sigar_arp_list_get(sigar_t *sigar,
     char net_addr[128], hwaddr[128], mask_addr[128];
     int flags, type, status;
     sigar_arp_t *arp;
+    static char *arp_path;
+
+    sigar_proc_path(&arp_path,  PROC_FS_ROOT, "net/arp");
 
     arplist->size = arplist->number = 0;
 
-    if (!(fp = fopen(PROC_FS_ROOT "net/arp", "r"))) {
+    if (!(fp = fopen(arp_path, "r"))) {
         return errno;
     }
 
     sigar_arp_list_create(arplist);
 
-    (void)fgets(buffer, sizeof(buffer), fp); /* skip header */
+    /* skip header */
+
+    int result = sigar_skip_file_lines(fp, 1);
+
+    if (result != SIGAR_OK)
+    {
+        fclose(fp);
+        return -1;
+    }
+
     while (fgets(buffer, sizeof(buffer), fp)) {
         int num;
 
@@ -2491,116 +2752,111 @@ int sigar_arp_list_get(sigar_t *sigar,
 }
 
 int sigar_proc_port_get(sigar_t *sigar, int protocol,
-                        unsigned long port, sigar_pid_t *pid)
+	unsigned long port, sigar_pid_t *spid)
 {
-    int status;
-    sigar_net_connection_t netconn;
-    DIR *dirp;
-    struct dirent *ent, dbuf;
+	int status;
+	sigar_net_connection_t netconn;
+	DIR *dir;
+	struct dirent *d;
+	int nameoff;
+	char name[1024];
+	*spid = 0;
 
-    SIGAR_ZERO(&netconn);
-    *pid = 0;
+	SIGAR_ZERO(&netconn);
 
-    status = sigar_net_connection_get(sigar, &netconn, port,
-                                      SIGAR_NETCONN_SERVER|protocol);
+	status = sigar_net_connection_get(sigar, &netconn, port,
+		SIGAR_NETCONN_SERVER | protocol);
 
-    if (status != SIGAR_OK) {
-        return status;
-    }
+	if (status != SIGAR_OK) {
+		return status;
+	}
 
-    if (netconn.local_port != port) {
-        return SIGAR_OK; /* XXX or ENOENT? */
-    }
+	if (netconn.local_port != port) {
+		return SIGAR_OK; /* XXX or ENOENT? */
+	}
 
-    if (!(dirp = opendir(PROCP_FS_ROOT))) {
-        return errno;
-    }
+	strcpy(name, gPROCP_FS_ROOT);
+	if (strlen(name) == 0 || name[strlen(name) - 1] != '/')
+		strcat(name, "/");
 
-    while (readdir_r(dirp, &dbuf, &ent) == 0) {
-        DIR *fd_dirp;
-        struct dirent *fd_ent, fd_dbuf;
-        struct stat sb;
-        char fd_name[BUFSIZ], pid_name[BUFSIZ];
-        int len, slen;
+	nameoff = strlen(name);
 
-        if (ent == NULL) {
-            break;
-        }
+	if (!(dir = opendir(gPROCP_FS_ROOT))) {
+		return errno;
+	}
 
-        if (!sigar_isdigit(*ent->d_name)) {
-            continue;
-        }
+	while ((d = readdir(dir)) != NULL) {
 
-        /* sprintf(pid_name, "/proc/%s", ent->d_name) */
-        memcpy(&pid_name[0], PROCP_FS_ROOT, SSTRLEN(PROCP_FS_ROOT));
-        len = SSTRLEN(PROCP_FS_ROOT);
-        pid_name[len++] = '/';
+		struct dirent *d1;
+		char process[16];
+		int pid, pos;
+		DIR *dir1;
+		char crap;
 
-        slen = strlen(ent->d_name);
-        memcpy(&pid_name[len], ent->d_name, slen);
-        len += slen;
-        pid_name[len] = '\0';
-        
-        if (stat(pid_name, &sb) < 0) {
-            continue;
-        }
-        if (sb.st_uid != netconn.uid) {
-            continue;
-        }
 
-        /* sprintf(fd_name, "%s/fd", pid_name) */
-        memcpy(&fd_name[0], pid_name, len);
-        memcpy(&fd_name[len], "/fd", 3);
-        fd_name[len+=3] = '\0';
+		if (sscanf(d->d_name, "%d%c", &pid, &crap) != 1)
+			continue;
 
-        if (!(fd_dirp = opendir(fd_name))) {
-            continue;
-        }
+		sprintf(name + nameoff, "%d/fd/", pid);
+		pos = strlen(name);
+		if ((dir1 = opendir(name)) == NULL)
+			continue;
 
-        while (readdir_r(fd_dirp, &fd_dbuf, &fd_ent) == 0) {
-            char fd_ent_name[BUFSIZ];
+		process[0] = '\0';
 
-            if (fd_ent == NULL) {
-                break;
-            }
+		while ((d1 = readdir(dir1)) != NULL) {
+			const char *pattern = "socket:[";
+			unsigned int ino;
+			char lnk[64];
+			int fd;
+			ssize_t link_len;
 
-            if (!sigar_isdigit(*fd_ent->d_name)) {
-                continue;
-            }
+			if (sscanf(d1->d_name, "%d%c", &fd, &crap) != 1)
+				continue;
 
-            /* sprintf(fd_ent_name, "%s/%s", fd_name, fd_ent->d_name) */
-            slen = strlen(fd_ent->d_name);
-            memcpy(&fd_ent_name[0], fd_name, len);
-            fd_ent_name[len] = '/';
-            memcpy(&fd_ent_name[len+1], fd_ent->d_name, slen);
-            fd_ent_name[len+1+slen] = '\0';
+			sprintf(name + pos, "%d", fd);
 
-            if (stat(fd_ent_name, &sb) < 0) {
-                continue;
-            }
+			link_len = readlink(name, lnk, sizeof(lnk) - 1);
+			if (link_len == -1)
+				continue;
+			lnk[link_len] = '\0';
 
-            if (sb.st_ino == netconn.inode) {
-                closedir(fd_dirp);
-                closedir(dirp);
-                *pid = strtoul(ent->d_name, NULL, 10);
-                return SIGAR_OK;
-            }
-            
-        }
+			if (strncmp(lnk, pattern, strlen(pattern)))
+				continue;
 
-        closedir(fd_dirp);
-    }
+			sscanf(lnk, "socket:[%u]", &ino);
 
-    closedir(dirp);
+			if (process[0] == '\0') {
+				char tmp[1024];
+				FILE *fp;
 
-    return SIGAR_OK;
+				snprintf(tmp, sizeof(tmp), "%s/%d/stat", gPROCP_FS_ROOT, pid);
+				if ((fp = fopen(tmp, "r")) != NULL) {
+					fscanf(fp, "%*d (%[^)])", process);
+					fclose(fp);
+				}
+			}
+
+			if (ino == netconn.inode) {
+				closedir(dir1);
+				closedir(dir);
+				*spid = pid;
+				return SIGAR_OK;
+			}
+		}
+		closedir(dir1);
+	}
+
+	closedir(dir);
+
+	return SIGAR_OK;
 }
 
 static void generic_vendor_parse(char *line, sigar_sys_info_t *info)
 {
     char *ptr;
     int len = 0;
-        
+
     while (*line) {
         SIGAR_SKIP_SPACE(line);
         if (!isdigit(*line)) {
@@ -2659,7 +2915,7 @@ static void redhat_vendor_parse(char *line, sigar_sys_info_t *info)
     }
 }
 
-#define is_quote(c) ((c == '\'') || (c == '"')) 
+#define is_quote(c) ((c == '\'') || (c == '"'))
 
 static void kv_parse(char *data, sigar_sys_info_t *info,
                      void (*func)(sigar_sys_info_t *, char *, char *))
@@ -2821,4 +3077,50 @@ int sigar_os_sys_info_get(sigar_t *sigar,
     get_linux_vendor_info(sysinfo);
 
     return SIGAR_OK;
+}
+
+/*
+ * Attempt to determine if we are in an container.
+ * We examine the 1/cgroup file and look for container entries.
+ * A non-container entry would look like
+ * 3:cpu:/
+ * whereas runing in a container would be
+ * 3:cpu:/docker/58db180b111f8cbc4c08cb58c162c740c728c398cc54bec4586e38d058a028d6
+ * There are numerous lines that may or may not contain a container name.  If we
+ * hit a string that matches - DOCKER_KEY_STR AND the entry doesn't have an "="
+ * sign in it..Thanks opensuse.
+ * eg: 1:name=systemd:/system
+ */
+
+#define DOCKER_KEY_STR ":/docker/"
+
+int sigar_os_is_in_container(sigar_t *sigar)
+{
+    FILE *fp;
+    char buffer[BUFSIZ], *ptr, *tmp_ptr;
+    int in_container = 0;
+
+    snprintf(buffer, sizeof(buffer), "%s/1/cgroup", PROC_FS_ROOT);
+
+    if (!(fp = fopen(buffer, "r"))) {
+        goto out;
+    }
+
+    while ((ptr = fgets(buffer, sizeof(buffer), fp))) {
+		// Hack check for opensuse.
+        tmp_ptr = strstr(buffer, "=");
+        if (tmp_ptr) {
+            continue;
+        }
+        tmp_ptr = strstr(buffer, DOCKER_KEY_STR);
+        if (tmp_ptr) {
+            in_container = 1;
+            break;
+        }
+    }
+
+    fclose(fp);
+
+out:
+    return in_container;
 }

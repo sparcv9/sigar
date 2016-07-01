@@ -50,6 +50,7 @@
 #define SIGAR_T_BASE \
    int cpu_list_cores; \
    int log_level; \
+   int in_container; \
    void *log_data; \
    sigar_log_impl_t log_impl; \
    void *ptql_re_data; \
@@ -74,7 +75,11 @@
 #if defined(WIN32)
 #   define SIGAR_INLINE __inline
 #elif defined(__GNUC__)
-#   define SIGAR_INLINE inline
+#  if __GNUC__ > 4
+#    define SIGAR_INLINE __attribute__ ((gnu_inline)) inline
+#  else
+#    define SIGAR_INLINE inline
+#  endif
 #else
 #   define SIGAR_INLINE
 #endif
@@ -112,8 +117,38 @@
 #endif
 
 #ifdef WIN32
-#define strcasecmp stricmp
-#define strncasecmp strnicmp
+#include <io.h>
+
+
+#ifndef strcasecmp
+#define strcasecmp _stricmp
+#endif
+
+#ifndef strncasecmp
+#define strncasecmp _strnicmp
+#endif
+
+#ifndef wcsdup
+#define wcsdup _wcsdup
+#endif
+
+#ifndef strdup
+#define strdup _strdup
+#endif
+
+#ifndef open
+#define open _open
+#endif
+
+#ifndef close
+#define close _close
+#endif
+
+#ifndef read
+#define read _read
+#endif
+
+
 #endif
 
 #ifndef strcaseEQ
@@ -154,7 +189,7 @@
 #define SIGAR_LAST_PROC_EXPIRE 2
 
 #define SIGAR_BUFFER_EXPIRE 1000
-
+   
 #define SIGAR_FS_MAX 10
 
 #define SIGAR_CPU_INFO_MAX 4
@@ -178,6 +213,8 @@
 int sigar_os_open(sigar_t **sigar);
 
 int sigar_os_close(sigar_t *sigar);
+
+int sigar_os_is_in_container(sigar_t *sigar);
 
 char *sigar_os_error_string(sigar_t *sigar, int err);
 
@@ -320,6 +357,23 @@ int sigar_net_interface_ipv6_config_get(sigar_t *sigar, const char *name,
     else \
         ifconfig->scope6 = SIGAR_IPV6_ADDR_ANY
 
+#define sigar_net_tcp_state_set(conn, val) \
+    switch (val) { \
+  case MIB_TCP_STATE_CLOSED: conn = SIGAR_TCP_CLOSE; break; \
+  case MIB_TCP_STATE_LISTEN: conn = SIGAR_TCP_LISTEN; break; \
+  case MIB_TCP_STATE_SYN_SENT: conn = SIGAR_TCP_SYN_SENT; break; \
+  case MIB_TCP_STATE_SYN_RCVD: conn = SIGAR_TCP_SYN_RECV; break; \
+  case MIB_TCP_STATE_ESTAB: conn = SIGAR_TCP_ESTABLISHED; break; \
+  case MIB_TCP_STATE_FIN_WAIT1: conn = SIGAR_TCP_FIN_WAIT1; break; \
+  case MIB_TCP_STATE_FIN_WAIT2: conn = SIGAR_TCP_FIN_WAIT2; break; \
+  case MIB_TCP_STATE_CLOSE_WAIT: conn = SIGAR_TCP_CLOSE_WAIT; break; \
+  case MIB_TCP_STATE_CLOSING: conn = SIGAR_TCP_CLOSING; break; \
+  case MIB_TCP_STATE_LAST_ACK: conn = SIGAR_TCP_LAST_ACK; break; \
+  case MIB_TCP_STATE_TIME_WAIT: conn = SIGAR_TCP_TIME_WAIT; break; \
+  case MIB_TCP_STATE_DELETE_TCB: \
+  default: conn = SIGAR_TCP_UNKNOWN; break; } 
+
+
 int sigar_tcp_curr_estab(sigar_t *sigar, sigar_tcp_t *tcp);
 
 int sigar_arp_list_create(sigar_arp_list_t *arplist);
@@ -364,13 +418,13 @@ int sigar_group_name_get(sigar_t *sigar, int gid, char *buf, int buflen);
     (disk)->reads = (disk)->writes = \
     (disk)->read_bytes = (disk)->write_bytes = \
     (disk)->rtime = (disk)->wtime = (disk)->qtime = (disk)->time = \
-    (disk)->queue = (disk)->service_time = SIGAR_FIELD_NOTIMPL; \
+    (disk)->queue = (disk)->service_time = (disk)->ios = SIGAR_FIELD_NOTIMPL; \
     (disk)->snaptime = 0
 
 /* key used for filesystem (/) -> device (/dev/hda1) mapping */
 /* and disk_usage cache for service_time */
 #define SIGAR_FSDEV_ID(sb) \
-    (S_ISBLK((sb).st_mode) ? (sb).st_rdev : ((sb).st_ino + (sb).st_dev))
+    (S_ISBLK((sb).st_mode) ? (sigar_uint64_t)((sb).st_rdev) : (sigar_uint64_t)(((sigar_uint64_t)((sb).st_ino) << 32) + (sb).st_dev))
 
 #if defined(WIN32) || defined(NETWARE)
 int sigar_get_iftype(const char *name, int *type, int *inst);

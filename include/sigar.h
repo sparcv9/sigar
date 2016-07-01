@@ -48,6 +48,8 @@ extern "C" {
 
 #if defined(WIN32)
 
+typedef unsigned __int16 sigar_uint16_t;
+
 typedef unsigned __int32 sigar_uint32_t;
 
 typedef unsigned __int64 sigar_uint64_t;
@@ -58,6 +60,8 @@ typedef __int64 sigar_int64_t;
 
 #elif ULONG_MAX > 4294967295UL
 
+typedef unsigned short sigar_uint16_t;
+
 typedef unsigned int sigar_uint32_t;
 
 typedef unsigned long sigar_uint64_t;
@@ -67,6 +71,8 @@ typedef int sigar_int32_t;
 typedef long sigar_int64_t;
 
 #else
+
+typedef unsigned short sigar_uint16_t;
 
 typedef unsigned int sigar_uint32_t;
 
@@ -111,9 +117,9 @@ typedef long long sigar_int64_t;
 #endif
 
 #ifdef WIN32
-typedef sigar_uint64_t sigar_pid_t;
-typedef unsigned long sigar_uid_t;
-typedef unsigned long sigar_gid_t;
+typedef sigar_uint32_t sigar_pid_t;
+typedef sigar_uint32_t sigar_uid_t;
+typedef sigar_uint32_t sigar_gid_t;
 #else
 #include <sys/types.h>
 typedef pid_t sigar_pid_t;
@@ -223,10 +229,22 @@ SIGAR_DECLARE(int) sigar_uptime_get(sigar_t *sigar,
 
 typedef struct {
     double loadavg[3];
+    int loadavg_result[3];
+    sigar_uint32_t processor_queue;
 } sigar_loadavg_t;
 
 SIGAR_DECLARE(int) sigar_loadavg_get(sigar_t *sigar,
                                      sigar_loadavg_t *loadavg);
+
+typedef struct {
+    sigar_uint64_t
+        ctxt_switches,
+        irq,
+        soft_irq;
+} sigar_system_stats_t;
+
+SIGAR_DECLARE(int) sigar_system_stats_get (sigar_t *sigar,
+                                           sigar_system_stats_t *stats);
 
 typedef struct {
     unsigned long number;
@@ -274,6 +292,7 @@ typedef struct {
     sigar_uint64_t stopped;
     sigar_uint64_t idle;
     sigar_uint64_t threads;
+	sigar_uint64_t open_files;
 } sigar_proc_stat_t;
 
 SIGAR_DECLARE(int) sigar_proc_stat_get(sigar_t *sigar,
@@ -404,6 +423,7 @@ typedef struct {
     int nice;
     int processor;
     sigar_uint64_t threads;
+	sigar_uint64_t open_files;
 } sigar_proc_state_t;
 
 SIGAR_DECLARE(int) sigar_proc_state_get(sigar_t *sigar, sigar_pid_t pid,
@@ -523,6 +543,7 @@ typedef struct {
     sigar_uint64_t qtime;
     sigar_uint64_t time;
     sigar_uint64_t snaptime;
+    sigar_uint64_t ios;
     double service_time;
     double queue;
 } sigar_disk_usage_t;
@@ -757,6 +778,7 @@ typedef struct {
     int state;
     unsigned long send_queue;
     unsigned long receive_queue;
+	sigar_pid_t pid;
 } sigar_net_connection_t;
 
 typedef struct {
@@ -787,6 +809,12 @@ struct sigar_net_connection_walker_t {
 
 SIGAR_DECLARE(int)
 sigar_net_connection_walk(sigar_net_connection_walker_t *walker);
+
+SIGAR_DECLARE(int)
+sigar_net_listeners_get(sigar_net_connection_walker_t *walker);
+
+SIGAR_DECLARE(int)
+sigar_net_connection_listeners_get(sigar_t *sigar, sigar_net_connection_list_t *connlist);
 
 typedef struct {
     int tcp_states[SIGAR_TCP_UNKNOWN];

@@ -34,6 +34,8 @@
 #include <sys/utsname.h>
 #include <dlfcn.h>
 #include <dirent.h>
+#include <sys/vm_usage.h>
+#include <zone.h>
 
 #define PROC_ERRNO ((errno == ENOENT) ? ESRCH : errno)
 #define SIGAR_USR_UCB_PS "/usr/ucb/ps"
@@ -66,29 +68,57 @@ int sigar_os_open(sigar_t **sig)
     int i, status;
     struct utsname name;
     char *ptr;
+    char zonenm[256];
 
-    sigar = malloc(sizeof(*sigar));
-    *sig = sigar;
+    if ((kc = kstat_open()) == NULL) {
+       *sig = NULL;
+       return errno;
+    }
 
-    sigar->log_level = -1; /* log nothing by default */
-    sigar->log_impl = NULL;
-    sigar->log_data = NULL;
+    /*
+     * Use calloc instead of malloc to set everything to 0
+     * to avoid having to set each individual member to 0/NULL
+     * later.
+     */
+    if ((*sig = sigar = calloc(1, sizeof(*sigar))) == NULL) {
+       return ENOMEM;
+    }
+
+    sigar->zoneid = getzoneid ();
+    if (sigar->zoneid < 0) {
+      sigar->zoneid = 0;
+      sigar->zonenm = strdup ("unknown");
+      sigar->zonenm_short = strdup ("unknown");
+    } else {
+      getzonenamebyid (sigar->zoneid, zonenm, sizeof (zonenm));
+      sigar->zonenm = strdup (zonenm);
+      ptr = strchr (zonenm, '-');
+      if (ptr) {
+        *ptr = 0;
+      }
+      ptr = strchr (zonenm, ':');
+      if (ptr) {
+        *ptr = 0;
+      }
+      sigar->zonenm_short = strdup (zonenm);
+    }
 
     uname(&name);
     if ((ptr = strchr(name.release, '.'))) {
-        ptr++;
-        sigar->solaris_version = atoi(ptr);
+        sigar->solaris_version = atoi(ptr + 1);
     }
     else {
         sigar->solaris_version = 6;
     }
 
+    sigar->joyent = !strncmp (name.version, "joyent", 6);
+
     if ((ptr = getenv("SIGAR_USE_UCB_PS"))) {
         sigar->use_ucb_ps = strEQ(ptr, "true");
     }
-    else {
-        struct stat sb;
-        if (stat(SIGAR_USR_UCB_PS, &sb) < 0) {
+
+    if (sigar->use_ucb_ps) {
+        if (access(SIGAR_USR_UCB_PS, X_OK) == -1) {
             sigar->use_ucb_ps = 0;
         }
         else {
@@ -103,18 +133,7 @@ int sigar_os_open(sigar_t **sig)
     }
 
     sigar->ticks = sysconf(_SC_CLK_TCK);
-    sigar->kc = kc = kstat_open();
-
-    if (!kc) {
-        return errno;
-    }
-
-    sigar->cpulist.size = 0;
-    sigar->ncpu = 0;
-    sigar->ks.cpu = NULL;
-    sigar->ks.cpu_info = NULL;
-    sigar->ks.cpuid = NULL;
-    sigar->ks.lcpu = 0;
+    sigar->kc = kc;
 
     sigar->koffsets.system[0] = -1;
     sigar->koffsets.mempages[0] = -1;
@@ -122,9 +141,7 @@ int sigar_os_open(sigar_t **sig)
 
     if ((status = sigar_get_kstats(sigar)) != SIGAR_OK) {
         fprintf(stderr, "status=%d\n", status);
-    } 
-
-    sigar->boot_time = 0;
+    }
 
     if ((ksp = sigar->ks.system) &&
         (kstat_read(kc, ksp, NULL) >= 0))
@@ -135,16 +152,6 @@ int sigar_os_open(sigar_t **sig)
     }
 
     sigar->last_pid = -1;
-    sigar->pinfo = NULL;
-
-    sigar->plib = NULL;
-    sigar->pgrab = NULL;
-    sigar->pfree = NULL;
-    sigar->pobjname = NULL;
-
-    sigar->pargs = NULL;
-
-    SIGAR_ZERO(&sigar->mib2);
     sigar->mib2.sd = -1;
 
     return SIGAR_OK;
@@ -174,6 +181,8 @@ int sigar_os_close(sigar_t *sigar)
     if (sigar->pargs) {
         sigar_cache_destroy(sigar->pargs);
     }
+    free (sigar->zonenm);
+    free (sigar->zonenm_short);
     free(sigar);
     return SIGAR_OK;
 }
@@ -188,9 +197,75 @@ char *sigar_os_error_string(sigar_t *sigar, int err)
     }
 }
 
+/* see usr/src/cmd/zonestat/zonestatd/zonestatd.c */
+typedef struct sigar_vmusage64 {
+        id_t vmu_zoneid;
+        uint_t vmu_type;
+        id_t vmu_id;
+        int vmu_align_next_members_on_8_bytes;
+        uint64_t vmu_rss_all;
+        uint64_t vmu_rss_private;
+        uint64_t vmu_rss_shared;
+        uint64_t vmu_swap_all;
+        uint64_t vmu_swap_private;
+        uint64_t vmu_swap_shared;
+} sigar_vmusage64_t;
+
+/* getvmusage() can be CPU expensive; throttle calls to secs: */
+#define VMUSAGE_INTERVAL       20
+
+static int zone_mem_get(sigar_t *sigar, sigar_mem_t *mem)
+{
+    kstat_t *ksp;
+    char path[MAXPATHLEN];
+    sigar_vmusage64_t result;
+    size_t nres = 1;
+    sigar_uint64_t used = 0, cap = 0;
+    int ret;
+
+    /*
+     * The memory_cap kstat is ideal (originally added to SmartOS), but
+     * if that doesn't exist, switch to getvmusage().
+     */
+    if ((ksp = kstat_lookup(sigar->kc, "memory_cap", -1, NULL)) &&
+        (kstat_read(sigar->kc, ksp, NULL) != -1))
+    {
+        kstat_named_t *kn;
+
+        if ((kn = (kstat_named_t *)kstat_data_lookup(ksp, "rss"))) {
+            used = kn->value.i64;
+        }
+        if ((kn = (kstat_named_t *)kstat_data_lookup(ksp, "physcap"))) {
+            cap = kn->value.i64;
+        }
+    }
+    else {
+        ret = sysinfo(SI_ARCHITECTURE_64, path, sizeof (path));
+        if (ret < 0) {
+                /* 32-bit kernels not supported via getvmusage() */
+                return -1;
+        }
+
+        /* since we are not GZ, should only get one result */
+        if (getvmusage(VMUSAGE_ZONE, VMUSAGE_INTERVAL, (vmusage_t *)&result,
+            &nres) != 0 || nres != 1) {
+            return -1;
+        }
+        used = result.vmu_rss_all;
+        cap = mem->total;
+    }
+
+    mem->actual_free = mem->free = cap - used;
+    mem->actual_used = mem->used = used;
+
+    sigar_mem_calc_ram(sigar, mem);
+
+    return SIGAR_OK;
+}
+
 int sigar_mem_get(sigar_t *sigar, sigar_mem_t *mem)
 {
-    kstat_ctl_t *kc = sigar->kc; 
+    kstat_ctl_t *kc = sigar->kc;
     kstat_t *ksp;
     sigar_uint64_t kern = 0;
 
@@ -202,6 +277,11 @@ int sigar_mem_get(sigar_t *sigar, sigar_mem_t *mem)
 
     if (sigar_kstat_update(sigar) == -1) {
         return errno;
+    }
+
+    if (getzoneid() != GLOBAL_ZONEID) {
+        /* zone-aware */
+       return (zone_mem_get(sigar, mem));
     }
 
     if ((ksp = sigar->ks.syspages) && kstat_read(kc, ksp, NULL) >= 0) {
@@ -413,9 +493,9 @@ int sigar_cpu_get(sigar_t *sigar, sigar_cpu_t *cpu)
     return SIGAR_OK;
 }
 
-int sigar_cpu_list_get(sigar_t *sigar, sigar_cpu_list_t *cpulist)
+static int sigar_cpu_list_get_global(sigar_t *sigar, sigar_cpu_list_t *cpulist)
 {
-    kstat_ctl_t *kc = sigar->kc; 
+    kstat_ctl_t *kc = sigar->kc;
     kstat_t *ksp;
     uint_t cpuinfo[CPU_STATES];
     unsigned int i;
@@ -466,7 +546,7 @@ int sigar_cpu_list_get(sigar_t *sigar, sigar_cpu_list_t *cpulist)
             sigar_log_printf(sigar, SIGAR_LOG_ERROR,
                              "NULL ksp for cpu %d (id=%d)",
                              i, sigar->ks.cpuid[i]);
-            continue; /* shouldnot happen */
+            continue; /* should not happen */
         }
 
         if (kstat_read(kc, ksp, NULL) < 0) {
@@ -474,7 +554,7 @@ int sigar_cpu_list_get(sigar_t *sigar, sigar_cpu_list_t *cpulist)
                              "kstat_read failed for cpu %d (id=%d): %s",
                              i, sigar->ks.cpuid[i],
                              sigar_strerror(sigar, errno));
-            continue; /* shouldnot happen */
+            continue; /* should not happen */
         }
 
         /*
@@ -536,6 +616,97 @@ int sigar_cpu_list_get(sigar_t *sigar, sigar_cpu_list_t *cpulist)
     return SIGAR_OK;
 }
 
+/*
+ * Special handling for Joyent SmartOS. If we are not in the global zone, we
+ * want to report CPU stats for the current zone only. In order to keep this
+ * list as similar to the non-Joyent case as possible, we preserve the number
+ * of CPUs (as upstream code may depend on that number for other purposes)
+ * but only populate the first CPU entry with the kstat results. At least on
+ * SmartOS 1.7.2, kstat only reports CPU usage rolled up into a single metric.
+ * The per-CPU stats it reports are for the global zone.
+ *
+ * The implication of this is that any code that depends on accurate numbers
+ * for each actual CPU, this will fail, and we will need to report the number
+ * of CPUs as 1, and only return the zone-wide rolled up stats in that single
+ * CPU entry.
+ */
+static int sigar_cpu_list_get_joyent(sigar_t *sigar, sigar_cpu_list_t *cpulist)
+{
+    kstat_t *ksp;
+    char znm[32];
+    unsigned int i;
+    sigar_cpu_t *cpu;
+
+    if (sigar_kstat_update(sigar) == -1) {
+        return errno;
+    }
+
+    if (cpulist == &sigar->cpulist) {
+        if (sigar->cpulist.size == 0) {
+            /* create once */
+            sigar_cpu_list_create(cpulist);
+        }
+        else {
+            /* reset, re-using cpulist.data */
+            sigar->cpulist.number = 0;
+        }
+    }
+    else {
+        sigar_cpu_list_create(cpulist);
+    }
+
+    strncpy (znm, sigar->zonenm, 30);
+    znm[30] = 0;
+
+    ksp = kstat_lookup (sigar->kc, "zones", -1, znm);
+    if (ksp) {
+        cpu = &cpulist->data[cpulist->number++];
+        SIGAR_ZERO(cpu);
+
+        kstat_read (sigar->kc, ksp, NULL);
+        if (KSTAT_TYPE_NAMED != ksp->ks_type) {
+            return SIGAR_OK;
+        }
+
+        for (i = 0; i < ksp->ks_ndata; i++) {
+            kstat_named_t *kn = &((kstat_named_t *)ksp->ks_data)[i];
+
+            if (strEQ (kn->name, "nsec_sys")) {
+                cpu->sys = kn->value.ui64 / 1000000;
+            } else if (strEQ (kn->name, "nsec_user")) {
+                cpu->user = kn->value.ui64 / 1000000;
+            } else if (strEQ (kn->name, "nsec_waitrq")) {
+                cpu->wait = kn->value.ui64 / 1000000;
+            }
+        }
+
+        /*
+         * Prime a timestamp from the last time we got CPU metrics
+         */
+        uint64_t now = sigar_time_now_millis();
+        if (!sigar->cpu_prev_time) {
+            sigar->cpu_total = cpu->user + cpu->sys + cpu->wait;
+        } else {
+            uint64_t delta = now - sigar->cpu_prev_time;
+            sigar->cpu_total += delta;
+            cpu->total = sigar->cpu_total;
+            cpu->idle = sigar->cpu_total - (cpu->user + cpu->sys + cpu->wait);
+        }
+        sigar->cpu_prev_time = now;
+    }
+
+    return SIGAR_OK;
+}
+
+int sigar_cpu_list_get(sigar_t *sigar, sigar_cpu_list_t *cpulist)
+{
+    if (sigar->joyent) {
+        return sigar_cpu_list_get_joyent (sigar, cpulist);
+    } else {
+        return sigar_cpu_list_get_global (sigar, cpulist);
+    }
+}
+
 int sigar_uptime_get(sigar_t *sigar,
                      sigar_uptime_t *uptime)
 {
@@ -561,6 +732,8 @@ int sigar_loadavg_get(sigar_t *sigar,
     kstat_t *ksp;
     int i;
 
+    loadavg->processor_queue = SIGAR_FIELD_NOTIMPL;
+
     if (sigar_kstat_update(sigar) == -1) {
         return errno;
     }
@@ -574,9 +747,42 @@ int sigar_loadavg_get(sigar_t *sigar,
     }
 
     sigar_koffsets_init_system(sigar, ksp);
-    
+
     for (i=0; i<3; i++) {
         loadavg->loadavg[i] = (double)kSYSTEM(loadavg_keys[i]) / FSCALE;
+        loadavg->loadavg_result[i] = 0;
+    }
+
+    return SIGAR_OK;
+}
+
+int sigar_system_stats_get (sigar_t *sigar,
+                            sigar_system_stats_t *system_stats)
+{
+    int status;
+    int i;
+    cpu_stat_t *cpu_stat;
+    cpu_sysinfo_t *info;
+
+    status =  sigar_cpu_list_get(sigar, &sigar->cpulist);
+
+    if (status != SIGAR_OK)
+        return SIGAR_ENOTIMPL;
+
+    memset(system_stats, 0, sizeof(*system_stats));
+
+    for (i = 0; i < sigar->ncpu; i++) {
+        cpu_stat = (cpu_stat_t *)sigar->ks.cpu[i]->ks_data;
+        if (cpu_stat) {
+            info = &cpu_stat->cpu_sysinfo;
+            system_stats->ctxt_switches += info->pswitch;
+            system_stats->irq += info->intr;
+            /*
+             * Number of syscalls should give a fair indication of
+             * soft interrupts.
+             */
+            system_stats->soft_irq += info->syscall;
+        }
     }
 
     return SIGAR_OK;
@@ -643,21 +849,21 @@ static int sigar_init_libproc(sigar_t *sigar)
 
 /* from libproc.h, not included w/ solaris distro */
 /* Error codes from Pgrab(), Pfgrab_core(), and Pgrab_core() */
-#define	G_STRANGE	-1	/* Unanticipated error, errno is meaningful */
-#define	G_NOPROC	1	/* No such process */
-#define	G_NOCORE	2	/* No such core file */
-#define	G_NOPROCORCORE	3	/* No such proc or core (for proc_arg_grab) */
-#define	G_NOEXEC	4	/* Cannot locate executable file */
-#define	G_ZOMB		5	/* Zombie process */
-#define	G_PERM		6	/* No permission */
-#define	G_BUSY		7	/* Another process has control */
-#define	G_SYS		8	/* System process */
-#define	G_SELF		9	/* Process is self */
-#define	G_INTR		10	/* Interrupt received while grabbing */
-#define	G_LP64		11	/* Process is _LP64, self is ILP32 */
-#define	G_FORMAT	12	/* File is not an ELF format core file */
-#define	G_ELF		13	/* Libelf error, elf_errno() is meaningful */
-#define	G_NOTE		14	/* Required PT_NOTE Phdr not present in core */
+#define G_STRANGE     -1    /* Unanticipated error, errno is meaningful */
+#define G_NOPROC       1    /* No such process */
+#define G_NOCORE       2    /* No such core file */
+#define G_NOPROCORCORE 3    /* No such proc or core (for proc_arg_grab) */
+#define G_NOEXEC       4    /* Cannot locate executable file */
+#define G_ZOMB         5    /* Zombie process */
+#define G_PERM         6    /* No permission */
+#define G_BUSY         7    /* Another process has control */
+#define G_SYS          8    /* System process */
+#define G_SELF         9    /* Process is self */
+#define G_INTR        10    /* Interrupt received while grabbing */
+#define G_LP64        11    /* Process is _LP64, self is ILP32 */
+#define G_FORMAT      12    /* File is not an ELF format core file */
+#define G_ELF         13    /* Libelf error, elf_errno() is meaningful */
+#define G_NOTE        14    /* Required PT_NOTE Phdr not present in core */
 
 static int sigar_pgrab(sigar_t *sigar, sigar_pid_t pid,
                        const char *func,
@@ -719,7 +925,7 @@ int sigar_proc_mem_get(sigar_t *sigar, sigar_pid_t pid,
     return SIGAR_OK;
 }
 
-int sigar_proc_cumulative_disk_io_get(sigar_t *sigar, sigar_pid_t pid, 
+int sigar_proc_cumulative_disk_io_get(sigar_t *sigar, sigar_pid_t pid,
                            sigar_proc_cumulative_disk_io_t *proc_cumulative_disk_io)
 {
    prusage_t usage;
@@ -827,6 +1033,15 @@ int sigar_proc_state_get(sigar_t *sigar, sigar_pid_t pid,
         break;
     }
 
+    sigar_proc_fd_t proc_fd_count;
+
+    proc_fd_count.total = SIGAR_FIELD_NOTIMPL;
+
+    status = sigar_proc_fd_get(sigar, pid, &proc_fd_count );
+
+    if (status == SIGAR_OK)
+        procstate->open_files = proc_fd_count.total;
+
     return SIGAR_OK;
 }
 
@@ -887,7 +1102,15 @@ static int ucb_ps_args_get(sigar_t *sigar, sigar_pid_t pid,
             return errno;
         }
         /* skip header */
-        (void)fgets(buffer, sizeof(buffer), fp);
+
+        int result = sigar_skip_file_lines(fp, 1);
+
+        if (result != SIGAR_OK)
+        {
+            pclose(fp);
+            return -1;
+        }
+
         if ((args = fgets(buffer, sizeof(buffer), fp))) {
             int len;
 
@@ -992,7 +1215,7 @@ int sigar_os_proc_args_get(sigar_t *sigar, sigar_pid_t pid,
             return errno;
         }
 
-        buffer[nread] = '\0'; 
+        buffer[nread] = '\0';
         alen = strlen(buffer)+1;
         arg = malloc(alen);
         memcpy(arg, buffer, alen);
@@ -1202,7 +1425,7 @@ int sigar_proc_exe_get(sigar_t *sigar, sigar_pid_t pid,
     return SIGAR_OK;
 }
 
-static int sigar_read_xmaps(sigar_t *sigar, 
+static int sigar_read_xmaps(sigar_t *sigar,
                             prxmap_t *xmaps, int total,
                             unsigned long *last_inode,
                             struct ps_prochandle *phandle,
@@ -1228,7 +1451,7 @@ static int sigar_read_xmaps(sigar_t *sigar,
 
         sigar->pobjname(phandle, xmaps[i].pr_vaddr, buffer, sizeof(buffer));
 
-        status = 
+        status =
             procmods->module_getter(procmods->data, buffer, strlen(buffer));
 
         if (status != SIGAR_OK) {
@@ -1393,7 +1616,11 @@ int sigar_file_system_list_get(sigar_t *sigar,
         fsp = &fslist->data[fslist->number++];
 
         SIGAR_SSTRCPY(fsp->dir_name, ent.mnt_mountp);
-        SIGAR_SSTRCPY(fsp->dev_name, ent.mnt_special);
+        if (sigar->joyent) {
+            SIGAR_SSTRCPY(fsp->dev_name, sigar->zonenm_short);
+        } else {
+            SIGAR_SSTRCPY(fsp->dev_name, ent.mnt_special);
+        }
         SIGAR_SSTRCPY(fsp->sys_type_name, ent.mnt_fstype);
         SIGAR_SSTRCPY(fsp->options, ent.mnt_mntopts);
         sigar_fs_type_init(fsp);
@@ -1513,7 +1740,7 @@ static int create_fsdev_cache(sigar_t *sigar)
     sigar->fsdev = sigar_cache_new(15);
 
     status = sigar_file_system_list_get(sigar, &fslist);
-    
+
     if (status != SIGAR_OK) {
         return status;
     }
@@ -1651,7 +1878,7 @@ static int simple_hash(const char *s)
 {
     int hash = 0;
     while (*s) {
-        hash = 31*hash + *s++; 
+        hash = 31*hash + *s++;
     }
     return hash;
 }
@@ -1660,12 +1887,50 @@ int sigar_disk_usage_get(sigar_t *sigar, const char *name,
                          sigar_disk_usage_t *disk)
 {
     kstat_t *ksp;
-    int status;
+    int i, status;
+    char znm[32];
     iodev_t *iodev = NULL;
     sigar_cache_entry_t *ent;
     sigar_uint64_t id;
 
     SIGAR_DISK_STATS_INIT(disk);
+
+    if (sigar->joyent) {
+        strncpy (znm, sigar->zonenm, 30);
+        znm[30] = 0;
+
+        ksp = kstat_lookup (sigar->kc, "zone_vfs", -1, znm);
+        if (!ksp) {
+            return ENXIO;
+        }
+
+        kstat_read (sigar->kc, ksp, NULL);
+        if (KSTAT_TYPE_NAMED != ksp->ks_type) {
+            return ENXIO;
+        }
+
+        for (i = 0; i < ksp->ks_ndata; i++) {
+            kstat_named_t *kn = &((kstat_named_t *)ksp->ks_data)[i];
+
+            if (strEQ (kn->name, "nread")) {
+                disk->read_bytes = kn->value.ui64;
+            } else if (strEQ (kn->name, "reads")) {
+                disk->reads = kn->value.ui64;
+            } else if (strEQ (kn->name, "rlentime")) {
+                disk->rtime = kn->value.ui64;
+            } else if (strEQ (kn->name, "nwritten")) {
+                disk->write_bytes = kn->value.ui64;
+            } else if (strEQ (kn->name, "writes")) {
+                disk->writes = kn->value.ui64;
+            } else if (strEQ (kn->name, "wlentime")) {
+                disk->qtime = disk->wtime = kn->value.ui64;
+            }
+        }
+
+        disk->time = disk->rtime + disk->wtime;
+        disk->snaptime = ksp->ks_snaptime;
+        return SIGAR_OK;
+    }
 
     if (!sigar->fsdev) {
         if (create_fsdev_cache(sigar) != SIGAR_OK) {
@@ -1683,33 +1948,34 @@ int sigar_disk_usage_get(sigar_t *sigar, const char *name,
         id = SIGAR_FSDEV_ID(sb);
         ent = sigar_cache_get(sigar->fsdev, id);
         if (ent->value == NULL) {
-            return ENXIO;
+            status = ENXIO;
         }
-        iodev = (iodev_t *)ent->value;
+        else {
+            iodev = (iodev_t *)ent->value;
 
-        status = sigar_kstat_disk_usage_get(sigar, iodev->name, disk, &ksp);
+            status = sigar_kstat_disk_usage_get(sigar, iodev->name, disk, &ksp);
+        }
     }
     else {
         status = sigar_kstat_disk_usage_get(sigar, name, disk, &ksp);
-        if (status != SIGAR_OK) {
-            return status;
-        }
-        id = simple_hash(name); /*XXX*/
-        ent = sigar_cache_get(sigar->fsdev, id);
-        if (ent->value) {
-            iodev = (iodev_t *)ent->value;
-        }
-        else {
-            ent->value = iodev = malloc(sizeof(*iodev));
-            SIGAR_SSTRCPY(iodev->name, name);
-            SIGAR_DISK_STATS_INIT(&iodev->disk);
+        if (status == SIGAR_OK) {
+            id = simple_hash(name); /*XXX*/
+            ent = sigar_cache_get(sigar->fsdev, id);
+            if (ent->value) {
+                iodev = (iodev_t *)ent->value;
+            }
+            else {
+                ent->value = iodev = malloc(sizeof(*iodev));
+                SIGAR_SSTRCPY(iodev->name, name);
+                SIGAR_DISK_STATS_INIT(&iodev->disk);
+            }
         }
     }
 
     /* service_time formula derived from opensolaris.org:iostat.c */
     if ((status == SIGAR_OK) && iodev) {
         sigar_uint64_t delta;
-        double avw, avr, tps, mtps; 
+        double avw, avr, tps, mtps;
         double etime, hr_etime;
 
         if (iodev->disk.snaptime) {
@@ -1763,6 +2029,11 @@ int sigar_disk_usage_get(sigar_t *sigar, const char *name,
         memcpy(&iodev->disk, disk, sizeof(iodev->disk));
     }
 
+    if (status == ENXIO) {
+        /* Virtual device. This has no physical device mapping. */
+        return SIGAR_OK;
+    }
+
     return status;
 }
 
@@ -1778,7 +2049,9 @@ int sigar_file_system_usage_get(sigar_t *sigar,
 
     fsusage->use_percent = sigar_file_system_usage_calc_used(sigar, fsusage);
 
-    sigar_disk_usage_get(sigar, dirname, &fsusage->disk);
+    if (!sigar->joyent) {
+        sigar_disk_usage_get(sigar, dirname, &fsusage->disk);
+    }
 
     return SIGAR_OK;
 }
@@ -1980,7 +2253,7 @@ int sigar_net_route_list_get(sigar_t *sigar,
                 route->flags |= RTF_GATEWAY;
             }
 
-            route->use = route->window = route->mtu = 
+            route->use = route->window = route->mtu =
                 SIGAR_FIELD_NOTIMPL; /*XXX*/
         }
     }
@@ -2096,7 +2369,7 @@ static void ifstat_kstat_common(sigar_net_interface_stat_t *ifstat,
 static int sigar_net_ifstat_get_any(sigar_t *sigar, const char *name,
                                     sigar_net_interface_stat_t *ifstat)
 {
-    kstat_ctl_t *kc = sigar->kc; 
+    kstat_ctl_t *kc = sigar->kc;
     kstat_t *ksp;
     kstat_named_t *data;
 
@@ -2322,7 +2595,7 @@ int sigar_net_connection_walk(sigar_net_connection_walker_t *walker)
     struct opthdr *op;
 
     while ((rc = get_mib2(&sigar->mib2, &op, &data, &len)) == GET_MIB2_OK) {
-        if ((op->level == MIB2_TCP) && 
+        if ((op->level == MIB2_TCP) &&
             (op->name == MIB2_TCP_13) &&
             want_tcp)
         {
@@ -2331,7 +2604,7 @@ int sigar_net_connection_walk(sigar_net_connection_walker_t *walker)
                                    (struct mib2_tcpConnEntry *)data,
                                    len);
         }
-        else if ((op->level == MIB2_UDP) && 
+        else if ((op->level == MIB2_UDP) &&
                  (op->name == MIB2_UDP_5) &&
                  want_udp)
         {
@@ -2392,8 +2665,35 @@ sigar_tcp_get(sigar_t *sigar,
     }
 }
 
+SIGAR_DECLARE(int)
+	sigar_net_listeners_get(sigar_net_connection_walker_t *walker)
+{
+	int i, status;
+
+	status = sigar_net_connection_walk(walker);
+
+	if (status != SIGAR_OK) {
+		return status;
+	}
+
+	sigar_net_connection_list_t *list = walker->data;
+
+	sigar_pid_t pid;
+	for (i = 0; i < list->number; i++) {
+		status = sigar_proc_port_get(walker->sigar, walker->flags,
+			list->data[i].local_port, &pid);
+
+		if (status == SIGAR_OK) {
+			list->data[i].pid = pid;
+		}
+	}
+
+	return SIGAR_OK;
+}
+
+
 static int sigar_nfs_get(sigar_t *sigar,
-                         char *type, 
+                         char *type,
                          char **names,
                          char *nfs)
 {
@@ -2729,4 +3029,9 @@ int sigar_os_sys_info_get(sigar_t *sigar,
              sys_info->name, sys_info->vendor_version);
 
     return SIGAR_OK;
+}
+
+int sigar_os_is_in_container(sigar_t *sigar)
+{
+    return 0;
 }

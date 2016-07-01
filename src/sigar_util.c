@@ -26,10 +26,13 @@
 #include "sigar_util.h"
 #include "sigar_os.h"
 
+const char *gHostFSPrefix = NULL;
+
 #ifndef WIN32
 
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 SIGAR_INLINE char *sigar_uitoa(char *buf, unsigned int n, int *len)
 {
@@ -38,9 +41,9 @@ SIGAR_INLINE char *sigar_uitoa(char *buf, unsigned int n, int *len)
     *start = 0;
 
     do {
-	*--start = '0' + (n % 10);
+        *--start = '0' + (n % 10);
         ++*len;
-	n /= 10;
+    n /= 10;
     } while (n);
 
     return start;
@@ -64,12 +67,30 @@ SIGAR_INLINE char *sigar_skip_token(char *p)
 SIGAR_INLINE char *sigar_skip_multiple_token(char *p, int count)
 {
     int i;
-    
+
     for (i = 0; i < count; i++) {
         p = sigar_skip_token(p);
     }
 
     return p;
+}
+
+int sigar_skip_file_lines(FILE *fp, int count)
+{
+    char dummy[BUFSIZ];
+    char *ptr = NULL;
+
+    if (fp == NULL)
+        return -1;
+
+    while (count > 0)
+    {
+        ptr = fgets(dummy, sizeof(dummy), fp);
+        if (ptr == NULL)
+            return -1;
+        count--;
+    }
+    return SIGAR_OK;
 }
 
 char *sigar_getword(char **line, char stop)
@@ -98,23 +119,92 @@ char *sigar_getword(char **line, char stop)
     return res;
 }
 
+/*
+ * Build the proc path string with 'host' prefix if provided.
+ * For caller convienence, if the pointer passed in is non-null
+ * we assume the path is already created and just return the value.
+ * Otherwise (the first time), build the path.  The caller should use
+ * a static variable for the path, or retain it in some way for the
+ * majority of the use cases.
+ */
+
+char *sigar_proc_path(char **path, char *prefix, char *suffix)
+{
+    char *ret_str = NULL;
+
+    if (*path) {
+        // Already allocated.
+        return *path;
+    }
+
+    // Build the path, checking to see if we have a host level prefix.
+
+    int len = 0;
+    if (gHostFSPrefix) {
+        len = strlen(gHostFSPrefix);
+        if (prefix) {
+           len += strlen(prefix);
+        }
+        if (suffix) {
+            len += strlen(suffix);
+        }
+        ret_str = malloc(len + 1);
+        strcpy(ret_str, gHostFSPrefix);
+        if (prefix) {
+            strcat(ret_str, prefix);
+        }
+        if (suffix) {
+            strcat(ret_str, suffix);
+        }
+    } else {
+        if (prefix) {
+            len += strlen(prefix);
+        }
+        if (suffix) {
+            len += strlen(suffix);
+        }
+        ret_str = calloc(1, len + 1);
+        if (prefix) {
+            strcpy(ret_str, prefix);
+        }
+        if (suffix) {
+            strcat(ret_str, suffix);
+        }
+    }
+
+    *path = ret_str;
+
+    return *path;
+}
+
 /* avoiding sprintf */
 
 char *sigar_proc_filename(char *buffer, int buflen,
                           sigar_pid_t bigpid,
                           const char *fname, int fname_len)
 {
+    char proc_path[PATH_MAX];
     int len = 0;
+    int proc_path_len = 0;
     char *ptr = buffer;
     unsigned int pid = (unsigned int)bigpid; /* XXX -- This isn't correct */
     char pid_buf[UITOA_BUFFER_SIZE];
     char *pid_str = sigar_uitoa(pid_buf, pid, &len);
 
-    assert((unsigned int)buflen >=
-           (SSTRLEN(PROCP_FS_ROOT) + UITOA_BUFFER_SIZE + fname_len + 1));
+    if (gHostFSPrefix) {
+        strcpy(proc_path, gHostFSPrefix);
+        strcat(proc_path, PROCP_FS_ROOT);
+    } else {
+        strcpy(proc_path, PROCP_FS_ROOT);
+    }
 
-    memcpy(ptr, PROCP_FS_ROOT, SSTRLEN(PROCP_FS_ROOT));
-    ptr += SSTRLEN(PROCP_FS_ROOT);
+    proc_path_len = strlen(proc_path);
+
+    assert((unsigned int)buflen >=
+           proc_path_len + UITOA_BUFFER_SIZE + fname_len + 1);
+
+    memcpy(ptr, proc_path, proc_path_len);
+    ptr += proc_path_len;
 
     memcpy(ptr, pid_str, len);
     ptr += len;
@@ -153,7 +243,17 @@ int sigar_proc_file2str(char *buffer, int buflen,
 int sigar_proc_list_procfs_get(sigar_t *sigar,
                                sigar_proc_list_t *proclist)
 {
-    DIR *dirp = opendir("/proc");
+    char proc_path[PATH_MAX];
+
+    if (gHostFSPrefix) {
+        strcpy(proc_path, gHostFSPrefix);
+        strcat(proc_path, "/proc");
+    } else {
+        strcpy(proc_path, "/proc");
+    }
+
+    DIR *dirp = opendir(proc_path);
+
     struct dirent *ent;
 #ifdef HAVE_READDIR_R
     struct dirent dbuf;
@@ -463,7 +563,7 @@ sigar_iodev_t *sigar_iodev_get(sigar_t *sigar,
 double sigar_file_system_usage_calc_used(sigar_t *sigar,
                                          sigar_file_system_usage_t *fsusage)
 {
-    /* 
+    /*
      * win32 will not convert __uint64 to double.
      * convert to KB then do unsigned long -> double.
      */
@@ -698,7 +798,7 @@ void sigar_cpu_model_adjust(sigar_t *sigar, sigar_cpu_info_t *info)
 /* attempt to derive MHz from model name
  * currently works for certain intel strings
  * see exp/intel_amd_cpu_models.txt
- */ 
+ */
 int sigar_cpu_mhz_from_model(char *model)
 {
     int mhz = SIGAR_FIELD_NOTIMPL;
@@ -737,7 +837,7 @@ int sigar_cpu_mhz_from_model(char *model)
     return mhz;
 }
 
-#if !defined(WIN32) && !defined(NETWARE)
+#ifdef HAVE_RPC_RPC_H
 #include <netdb.h>
 #include <rpc/rpc.h>
 #include <rpc/pmap_prot.h>
@@ -788,7 +888,7 @@ SIGAR_DECLARE(int) sigar_rpc_ping(char *host,
     int sock;
     struct timeval timeout;
     unsigned short port = 0;
-    enum clnt_stat rpc_stat; 
+    enum clnt_stat rpc_stat;
 
     rpc_stat = get_sockaddr(&addr, host);
     if (rpc_stat != RPC_SUCCESS) {
@@ -799,7 +899,7 @@ SIGAR_DECLARE(int) sigar_rpc_ping(char *host,
     timeout.tv_usec = 0;
     addr.sin_port = htons(port);
     sock = RPC_ANYSOCK;
-    
+
     if (protocol == SIGAR_NETCONN_UDP) {
         client =
             clntudp_create(&addr, program, version,
@@ -961,7 +1061,7 @@ int sigar_dlinfo_modules(sigar_t *sigar, sigar_proc_modules_t *procmods)
     }
 
     do {
-        int status = 
+        int status =
             procmods->module_getter(procmods->data,
                                     (char *)map->l_name,
                                     strlen(map->l_name));

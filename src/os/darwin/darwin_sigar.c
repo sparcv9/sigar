@@ -16,6 +16,11 @@
  * limitations under the License.
  */
 
+#include "sigar.h"
+#include "sigar_private.h"
+#include "sigar_util.h"
+#include "sigar_os.h"
+
 #include <sys/param.h>
 #include <sys/mount.h>
 #if !(defined(__FreeBSD__) && (__FreeBSD_version >= 800000))
@@ -61,6 +66,14 @@
 #include <stdio.h>
 #endif
 
+#if defined(__FreeBSD__) && (__FreeBSD_version >= 500013)
+#define SIGAR_FREEBSD5_NFSSTAT
+#include <nfsclient/nfs.h>
+#include <nfsserver/nfs.h>
+#else
+#include <nfs/nfs.h>
+#endif
+
 #include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/resource.h>
@@ -74,14 +87,6 @@
 #include <net/route.h>
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-
-#if defined(__FreeBSD__) && (__FreeBSD_version >= 500013)
-#define SIGAR_FREEBSD5_NFSSTAT
-#include <nfsclient/nfs.h>
-#include <nfsserver/nfs.h>
-#else
-#include <nfs/nfs.h>
-#endif
 
 #include <dirent.h>
 #include <errno.h>
@@ -106,11 +111,6 @@
 #endif
 #include <netinet/tcp_var.h>
 #include <netinet/tcp_fsm.h>
-
-#include "sigar.h"
-#include "sigar_private.h"
-#include "sigar_util.h"
-#include "sigar_os.h"
 
 #define NMIB(mib) (sizeof(mib)/sizeof(mib[0]))
 
@@ -513,7 +513,7 @@ int sigar_mem_get(sigar_t *sigar, sigar_mem_t *mem)
 #ifdef SIGAR_FREEBSD5
 /* code in this function is based on FreeBSD 5.3 kvm_getswapinfo.c */
 static int getswapinfo_sysctl(struct kvm_swap *swap_ary,
-                              int swap_max) 
+                              int swap_max)
 {
     int ti, ttl;
     size_t mibi, len, size;
@@ -600,7 +600,7 @@ static int sigar_swap_fs_get(sigar_t *sigar, sigar_swap_t *swap) /* <= 10.3 */
     if (!(dirp = opendir(VM_DIR))) {
          return errno;
      }
- 
+
     /* looking for "swapfile0", "swapfile1", etc. */
     while ((ent = readdir(dirp))) {
         char *ptr = swapfile;
@@ -614,7 +614,7 @@ static int sigar_swap_fs_get(sigar_t *sigar, sigar_swap_t *swap) /* <= 10.3 */
         if (!strnEQ(ent->d_name, SWAPFILE, SSTRLEN(SWAPFILE))) {
             continue;
         }
-        
+
         /* sprintf(swapfile, "%s/%s", VM_DIR, ent->d_name) */
 
         memcpy(ptr, VM_DIR, SSTRLEN(VM_DIR));
@@ -939,9 +939,16 @@ int sigar_uptime_get(sigar_t *sigar,
 int sigar_loadavg_get(sigar_t *sigar,
                       sigar_loadavg_t *loadavg)
 {
-    getloadavg(loadavg->loadavg, 3);
+	loadavg->processor_queue = SIGAR_FIELD_NOTIMPL;
+	getloadavg(loadavg->loadavg, 3);
 
-    return SIGAR_OK;
+	return SIGAR_OK;
+}
+
+int sigar_system_stats_get (sigar_t *sigar,
+                            sigar_system_stats_t *system_stats)
+{
+	return SIGAR_ENOTIMPL;
 }
 
 #if defined(DARWIN) && defined(DARWIN_HAS_LIBPROC_H)
@@ -1396,7 +1403,7 @@ int sigar_proc_time_get(sigar_t *sigar, sigar_pid_t pid,
 
 #ifdef DARWIN
 /* thread state mapping derived from ps.tproj */
-static const char const thread_states[] = {
+static const char thread_states[] = {
     /*0*/ '-',
     /*1*/ SIGAR_PROC_STATE_RUN,
     /*2*/ SIGAR_PROC_STATE_ZOMBIE,
@@ -1419,9 +1426,9 @@ static int thread_state_get(thread_basic_info_data_t *info)
       case TH_STATE_STOPPED:
         return 5;
       case TH_STATE_HALTED:
-        return 6;  
+        return 6;
       default:
-        return 7; 
+        return 7;
     }
 }
 
@@ -1458,7 +1465,7 @@ static int sigar_proc_threads_get(sigar_t *sigar, sigar_pid_t pid,
                 state = tstate;
             }
         }
-    }		
+    }
 
     vm_deallocate(self, (vm_address_t)threads, sizeof(thread_t) * count);
 
@@ -1541,7 +1548,7 @@ typedef struct {
     int count;
 } sigar_kern_proc_args_t;
 
-static void sigar_kern_proc_args_destroy(sigar_kern_proc_args_t *kargs) 
+static void sigar_kern_proc_args_destroy(sigar_kern_proc_args_t *kargs)
 {
     if (kargs->buf) {
         free(kargs->buf);
@@ -2316,7 +2323,7 @@ int sigar_file_system_usage_get(sigar_t *sigar,
 #define CTL_HW_FREQ_MAX "hw.cpufrequency_max"
 #define CTL_HW_FREQ_MIN "hw.cpufrequency_min"
 #else
-/* XXX FreeBSD 5.x+ only? */ 
+/* XXX FreeBSD 5.x+ only? */
 #define CTL_HW_FREQ "machdep.tsc_freq"
 #endif
 
@@ -2407,7 +2414,7 @@ int sigar_cpu_info_list_get(sigar_t *sigar,
         SIGAR_SSTRCPY(vendor, "Apple");
     }
     else {
-        /* GenuineIntel -> Intel */ 
+        /* GenuineIntel -> Intel */
         if (strstr(vendor, "Intel")) {
             SIGAR_SSTRCPY(vendor, "Intel");
         }
@@ -2631,13 +2638,13 @@ static int sigar_ifmsg_iter(sigar_t *sigar, ifmsg_iter_t *iter)
         char *name;
         struct sockaddr_dl *sdl;
         struct if_msghdr *ifm = (struct if_msghdr *)ptr;
-        
+
         if (ifm->ifm_type != RTM_IFINFO) {
             break;
         }
 
         ptr += ifm->ifm_msglen;
-        
+
         while (ptr < end) {
             struct if_msghdr *next = (struct if_msghdr *)ptr;
 
@@ -3187,6 +3194,32 @@ int sigar_net_connection_walk(sigar_net_connection_walker_t *walker)
 }
 
 SIGAR_DECLARE(int)
+sigar_net_listeners_get(sigar_net_connection_walker_t *walker)
+{
+	int i, status;
+
+	status = sigar_net_connection_walk(walker);
+
+	if (status != SIGAR_OK) {
+		return status;
+	}
+
+	sigar_net_connection_list_t *list = walker->data;
+
+	sigar_pid_t pid;
+	for (i = 0; i < list->number; i++) {
+		status = sigar_proc_port_get(walker->sigar, walker->flags,
+			list->data[i].local_port, &pid);
+
+		if (status == SIGAR_OK) {
+			list->data[i].pid = pid;
+		}
+	}
+
+	return SIGAR_OK;
+}
+
+SIGAR_DECLARE(int)
 sigar_tcp_get(sigar_t *sigar,
               sigar_tcp_t *tcp)
 {
@@ -3242,7 +3275,7 @@ static int get_nfsstats(struct nfsstats *stats)
 }
 #endif
 
-#if defined(__OpenBSD__)
+#if defined(__OpenBSD__) || defined(DARWIN)
 typedef uint64_t rpc_cnt_t;
 #else
 typedef int rpc_cnt_t;
@@ -3616,29 +3649,25 @@ int sigar_os_sys_info_get(sigar_t *sigar,
 {
 #ifdef DARWIN
     char *codename = NULL;
-    SInt32 version, version_major, version_minor, version_fix;
+    SInt32 version_major, version_minor, version_fix;
 
     SIGAR_SSTRCPY(sysinfo->name, "MacOSX");
     SIGAR_SSTRCPY(sysinfo->vendor_name, "Mac OS X");
     SIGAR_SSTRCPY(sysinfo->vendor, "Apple");
 
-    if (Gestalt(gestaltSystemVersion, &version) == noErr) {
-        if (version >= 0x00001040) {
-            Gestalt('sys1' /*gestaltSystemVersionMajor*/, &version_major);
-            Gestalt('sys2' /*gestaltSystemVersionMinor*/, &version_minor);
-            Gestalt('sys3' /*gestaltSystemVersionBugFix*/, &version_fix);
-        }
-        else {
-            version_fix = version & 0xf;
-            version >>= 4;
-            version_minor = version & 0xf;
-            version >>= 4;
-            version_major = version - (version >> 4) * 6;
-        }
-    }
-    else {
+    FILE *fp = popen("/usr/bin/sw_vers -productVersion", "r");
+    if (fp == NULL) {
         return SIGAR_ENOTIMPL;
     }
+    char str[1024];
+    int  count;
+
+    char *val = fgets(str, sizeof(str) - 1, fp);
+    pclose(fp);
+    count = sscanf(val, "%d.%d.%d", &version_major, &version_minor, &version_fix);
+
+    if(count != 3)
+        return SIGAR_ENOTIMPL;
 
     snprintf(sysinfo->vendor_version,
              sizeof(sysinfo->vendor_version),
@@ -3669,6 +3698,12 @@ int sigar_os_sys_info_get(sigar_t *sigar,
             break;
           case 7:
             codename = "Lion";
+            break;
+          case 8:
+            codename = "Mountain Lion";
+            break;
+          case 9:
+            codename = "Mavericks";
             break;
           default:
             codename = "Unknown";
@@ -3715,4 +3750,9 @@ int sigar_os_sys_info_get(sigar_t *sigar,
 #endif
 
     return SIGAR_OK;
+}
+
+int sigar_os_is_in_container(sigar_t *sigar)
+{
+    return 0;
 }

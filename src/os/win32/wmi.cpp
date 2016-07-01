@@ -83,6 +83,7 @@ HRESULT WMI::Open(LPCTSTR machine, LPCTSTR user, LPCTSTR pass)
 {
     IWbemLocator *locator;
     wchar_t path[MAX_PATH];
+    
 
     if (wbem) {
         result = S_OK;
@@ -99,6 +100,11 @@ HRESULT WMI::Open(LPCTSTR machine, LPCTSTR user, LPCTSTR pass)
                              NULL,                        //Authentication info
                              EOAC_NONE,                   //Additional capabilities
                              NULL);                       //Reserved
+
+    if (FAILED(result) && RPC_E_TOO_LATE != result) {
+        CoUninitialize();
+        return result;
+    }
 
     result = CoCreateInstance(CLSID_WbemLocator,
                               NULL, /* IUnknown */
@@ -124,6 +130,14 @@ HRESULT WMI::Open(LPCTSTR machine, LPCTSTR user, LPCTSTR pass)
                                     NULL,         //Authority (e.g. Kerberos)
                                     NULL,         //Context object
                                     &wbem);       //pointer to IWbemServices proxy
+
+    result = CoSetProxyBlanket(wbem, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, NULL, RPC_C_AUTHN_LEVEL_CALL,
+        RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE);
+
+    if (FAILED(result))
+    {
+        return result;
+    }
 
     locator->Release();
 
