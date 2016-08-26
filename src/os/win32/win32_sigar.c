@@ -125,9 +125,9 @@ typedef enum {
     PERF_IX_DISK_MAX
 } perf_disk_offsets_t;
 
-#define PERF_TITLE_DISK_TIME 200 /* % Disk Time */
-#define PERF_TITLE_DISK_READ_TIME 202 /* % Disk Read Time */
-#define PERF_TITLE_DISK_WRITE_TIME 204 /* % Disk Write Time */
+#define PERF_TITLE_DISK_TIME 1400  /* % Disk Time */
+#define PERF_TITLE_DISK_READ_TIME 1402  /* % Disk Read Time */
+#define PERF_TITLE_DISK_WRITE_TIME 1404 /* % Disk Write Time */
 #define PERF_TITLE_DISK_READ  214 /* Disk Reads/sec */
 #define PERF_TITLE_DISK_WRITE 216 /* Disk Writes/sec */
 #define PERF_TITLE_DISK_READ_BYTES  220 /* Disk Read Bytes/sec */
@@ -157,6 +157,7 @@ typedef enum {
 #define PERF_VAL64(ix) \
     perf_offsets[ix] ? \
         *((sigar_uint64_t *)((BYTE *)counter_block + perf_offsets[ix])) : 0
+
 
 /* 1/100ns units to milliseconds */
 #define NS100_2MSEC(t) ((t) / 10000)
@@ -304,7 +305,7 @@ static PERF_OBJECT_TYPE *get_perf_object_inst(sigar_t *sigar,
     }
     
     performanceBuffer->buffer = block;
-    performanceBuffer->create_time = time(NULL);
+	performanceBuffer->create_time = time(NULL);
 
     object = PdhFirstObject(block);
 
@@ -345,7 +346,7 @@ static int get_mem_counters(sigar_t *sigar, sigar_swap_t *swap, sigar_mem_t *mem
         return status;
     }
 
-    data = (BYTE *)((BYTE *)object + object->DefinitionLength);
+	data = (BYTE *)((BYTE *)object + object->DefinitionLength);
 
     for (i=0, counter = PdhFirstCounter(object);
          i<object->NumCounters;
@@ -1424,7 +1425,7 @@ SIGAR_DECLARE(int) sigar_proc_cred_get(sigar_t *sigar, sigar_pid_t pid,
 }
 
 #define FILETIME2MSEC(ft) \
-    NS100_2MSEC((((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime))
+    NS100_2MSEC((((sigar_uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime))
 
 sigar_int64_t sigar_time_now_millis(void)
 {
@@ -2148,14 +2149,14 @@ SIGAR_DECLARE(int) sigar_disk_usage_get(sigar_t *sigar,
     if (!inst) {
         return err;
     }
-
-    for (i=0, inst = PdhFirstInstance(object);
+	
+	for (i=0, inst = PdhFirstInstance(object);
          i<object->NumInstances;
          i++, inst = PdhNextInstance(inst))
     {
         char drive[MAX_PATH];
         PERF_COUNTER_BLOCK *counter_block = PdhGetCounterBlock(inst);
-        wchar_t *name = (wchar_t *)((BYTE *)inst + inst->NameOffset);
+        wchar_t *name = PdhInstanceName(inst);
 
         SIGAR_W2A(name, drive, sizeof(drive));
 
@@ -2171,17 +2172,28 @@ SIGAR_DECLARE(int) sigar_disk_usage_get(sigar_t *sigar,
             }
         }
 
-        if (strnEQ(drive, dirname, 2)) {
-            disk->time   = PERF_VAL(PERF_IX_DISK_TIME);
-            disk->rtime  = PERF_VAL(PERF_IX_DISK_READ_TIME);
-            disk->wtime  = PERF_VAL(PERF_IX_DISK_WRITE_TIME);
+		char *letter = sigar_strdup(dirname);
+		if (letter[0] != '\0') {
+			/* uppercase driver letter */
+			letter[0] = sigar_toupper(letter[0]);
+		}
+
+        if (strnEQ(drive, letter, 2)) {
+            disk->time   = PERF_VAL64(PERF_IX_DISK_TIME);
+            disk->rtime  = PERF_VAL64(PERF_IX_DISK_READ_TIME);
+            disk->wtime  = PERF_VAL64(PERF_IX_DISK_WRITE_TIME);
             disk->reads  = PERF_VAL(PERF_IX_DISK_READ);
             disk->writes = PERF_VAL(PERF_IX_DISK_WRITE);
-            disk->read_bytes  = PERF_VAL(PERF_IX_DISK_READ_BYTES);
-            disk->write_bytes = PERF_VAL(PERF_IX_DISK_WRITE_BYTES);
+            disk->read_bytes  = PERF_VAL64(PERF_IX_DISK_READ_BYTES);
+            disk->write_bytes = PERF_VAL64(PERF_IX_DISK_WRITE_BYTES);
             disk->queue = PERF_VAL(PERF_IX_DISK_QUEUE);
-            return SIGAR_OK;
-        }
+
+			free(letter);
+
+			return SIGAR_OK;
+		}
+
+		free(letter);
     }
 
     return ENXIO;
@@ -2195,6 +2207,7 @@ sigar_file_system_usage_get(sigar_t *sigar,
     BOOL retval;
     ULARGE_INTEGER avail, total, free;
     int status;
+	char drive[30];
 
     /* prevent dialog box if A:\ drive is empty */
     UINT errmode = SetErrorMode(SEM_FAILCRITICALERRORS);
@@ -2219,9 +2232,11 @@ sigar_file_system_usage_get(sigar_t *sigar,
     fsusage->files      = SIGAR_FIELD_NOTIMPL;
     fsusage->free_files = SIGAR_FIELD_NOTIMPL;
 
-    status = sigar_disk_usage_get(sigar, dirname, &fsusage->disk);
+	if (SIGAR_OK != (status = sigar_disk_usage_get(sigar, dirname, &fsusage->disk))) {
+		return status;
+	}
 
-    return status;
+    return SIGAR_OK;
 }
 
 static int sigar_cpu_info_get(sigar_t *sigar, sigar_cpu_info_t *info)
@@ -3698,6 +3713,7 @@ SIGAR_DECLARE(int) sigar_arp_list_get(sigar_t *sigar,
 
     return SIGAR_OK;
 }
+
 
 #include <lm.h>
 

@@ -464,6 +464,7 @@ static __inline int file_type(char *file)
     }
 }
 
+#define FILE_SIZE(find_data) ((((unsigned __int64) (find_data).nFileSizeHigh) << 32) + (find_data).nFileSizeLow)
 static int dir_stat_get(sigar_t *sigar,
                         const char *dir,
                         sigar_dir_stat_t *dirstats,
@@ -512,9 +513,7 @@ static int dir_stat_get(sigar_t *sigar,
             continue;
         }
 
-        dirstats->disk_usage +=
-            (data.nFileSizeHigh * (MAXDWORD+1)) +
-            data.nFileSizeLow;
+		dirstats->disk_usage += FILE_SIZE(data);
 
         /* e.g. "C:\sigar\lib" */
         strncpy(ptr, data.cFileName, max);
@@ -799,17 +798,26 @@ static int dir_stat_get(sigar_t *sigar,
 #endif
 
 SIGAR_DECLARE(int) sigar_dir_stat_get(sigar_t *sigar,
-                                      const char *dir,
-                                      sigar_dir_stat_t *dirstats)
+										 const char *dir,
+										 sigar_dir_stat_t *dirstats)
 {
-    SIGAR_ZERO(dirstats);
-    return dir_stat_get(sigar, dir, dirstats, 0);
+	int status;
+	SIGAR_ZERO(dirstats);
+
+	if (SIGAR_OK != (status = dir_stat_get(sigar, dir, dirstats, 0))) {
+		return status;
+	}
+	return SIGAR_OK;
 }
 
 SIGAR_DECLARE(int) sigar_dir_usage_get(sigar_t *sigar,
-                                       const char *dir,
-                                       sigar_dir_usage_t *dirusage)
+										 const char *dir,
+										 sigar_dir_usage_t *dirusage)
 {
-    SIGAR_ZERO(dirusage);
-    return dir_stat_get(sigar, dir, dirusage, 1);
+	int status;
+	SIGAR_ZERO(dirusage);
+	if (SIGAR_OK != (status = dir_stat_get(sigar, dir, dirusage, 1))) {
+		return status;
+	}
+	return SIGAR_OK;
 }

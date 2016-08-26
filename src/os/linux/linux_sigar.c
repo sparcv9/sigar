@@ -344,7 +344,7 @@ static SIGAR_INLINE sigar_uint64_t sigar_meminfo(char *buffer,
 
 int sigar_mem_get(sigar_t *sigar, sigar_mem_t *mem)
 {
-    sigar_uint64_t buffers, cached, available, kern;
+    sigar_uint64_t buffers, cached, kern;
     char buffer[BUFSIZ];
 
     int status = sigar_file2str(gPROC_MEMINFO,
@@ -358,17 +358,17 @@ int sigar_mem_get(sigar_t *sigar, sigar_mem_t *mem)
     mem->free   = sigar_meminfo(buffer, MEMINFO_PARAM("MemFree"));
     mem->used   = mem->total - mem->free;
 
-    if (! sigar->has_avail) {
+    kern = sigar_meminfo(buffer, MEMINFO_PARAM("MemAvailable"));
+    if (kern) {
+        /* kernel 3.14 and later */
+        mem->actual_free = kern;
+        mem->actual_used = mem->total - kern;
+    } else {
         buffers = sigar_meminfo(buffer, MEMINFO_PARAM("Buffers"));
         cached  = sigar_meminfo(buffer, MEMINFO_PARAM("Cached"));
         kern    = buffers + cached;
         mem->actual_free = mem->free + kern;
         mem->actual_used = mem->used - kern;
-    } else {
-        /* kernel 3.14 and later */
-        available = sigar_meminfo(buffer, MEMINFO_PARAM("MemAvailable"));
-        mem->actual_free = available;
-        mem->actual_used = mem->total - available;
     }
 
     sigar_mem_calc_ram(sigar, mem);

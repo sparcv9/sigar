@@ -48,6 +48,9 @@
 #define sigar_tolower(c) \
     (tolower(((unsigned char)(c))))
 
+#define sigar_toupper(c) \
+    (toupper(((unsigned char)(c))))
+
 #ifdef WIN32
 #define sigar_fileno _fileno
 #define sigar_isatty _isatty
