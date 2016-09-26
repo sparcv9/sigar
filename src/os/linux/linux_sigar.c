@@ -1383,9 +1383,12 @@ static int get_iostat_proc_dstat(sigar_t *sigar,
         {
             int num;
             unsigned long
-                rio, rmerge, rsect, ruse,
-                wio, wmerge, wsect, wuse,
+                rio, wio,
                 running, use, aveq;
+
+            unsigned long
+                rmerge, rsect, ruse,
+                wmerge, wsect, wuse;
 
             ptr = sigar_skip_token(ptr); /* name */
 
