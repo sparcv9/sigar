@@ -90,6 +90,7 @@ static void set_proc_locations()
  * 20 - 0 (removed field)
  * 21 - itrealvalue
  * 22 - starttime
+
  * 23 - vsize
  * 24 - rss
  * 25 - rlim
@@ -1386,7 +1387,7 @@ static int get_iostat_proc_dstat(sigar_t *sigar,
                 rio, wio,
                 running, use, aveq;
 
-            unsigned long
+            unsigned long long
                 rmerge, rsect, ruse,
                 wmerge, wsect, wuse;
 
