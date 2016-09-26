@@ -1394,8 +1394,8 @@ static int get_iostat_proc_dstat(sigar_t *sigar,
             }
 
             num = sscanf(ptr,
-                         "%lu %lu %lu %lu "
-                         "%lu %lu %lu %lu "
+                         "%lu %llu %llu %llu "
+                         "%lu %llu %llu %llu "
                          "%lu %lu %lu",
                          &rio,     /* 1  # reads issued */
                          &rmerge,  /* 2  # reads merged */

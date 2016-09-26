@@ -292,7 +292,7 @@ typedef struct {
     sigar_uint64_t stopped;
     sigar_uint64_t idle;
     sigar_uint64_t threads;
-	sigar_uint64_t open_files;
+    sigar_uint64_t open_files;
 } sigar_proc_stat_t;
 
 SIGAR_DECLARE(int) sigar_proc_stat_get(sigar_t *sigar,
@@ -423,7 +423,7 @@ typedef struct {
     int nice;
     int processor;
     sigar_uint64_t threads;
-	sigar_uint64_t open_files;
+    sigar_uint64_t open_files;
 } sigar_proc_state_t;
 
 SIGAR_DECLARE(int) sigar_proc_state_get(sigar_t *sigar, sigar_pid_t pid,
@@ -778,7 +778,7 @@ typedef struct {
     int state;
     unsigned long send_queue;
     unsigned long receive_queue;
-	sigar_pid_t pid;
+    sigar_pid_t pid;
 } sigar_net_connection_t;
 
 typedef struct {

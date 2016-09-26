@@ -614,81 +614,82 @@ static int netif_name_short(void)
 
 int sigar_os_open(sigar_t **sigar_ptr)
 {
-    LONG result;
+    LONG result = SIGAR_OK;
     OSVERSIONINFO version;
     int i;
     sigar_t *sigar;
 
     *sigar_ptr = sigar = malloc(sizeof(*sigar));
-    sigar->machine = ""; /* local machine */
-    sigar->using_wide = 0; /*XXX*/
+	if (sigar) {
+		sigar->machine = ""; /* local machine */
+		sigar->using_wide = 0; /*XXX*/
 
-    sigar->processesBuffer = (buffer_t*) malloc(sizeof(buffer_t));
-    sigar->processesBuffer->buffer = NULL;
-    buffer_init(sigar->processesBuffer);
+		sigar->processesBuffer = (buffer_t*)malloc(sizeof(buffer_t));
+		sigar->processesBuffer->buffer = NULL;
+		buffer_init(sigar->processesBuffer);
 
-    sigar->performanceBuffers = (buffer_t**)malloc(sizeof(buffer_t *) * 5);
-    for (i = 0; i < 5; i++)
-    {
-        sigar->performanceBuffers[i] = (buffer_t*)malloc(sizeof(buffer_t));
-        sigar->performanceBuffers[i]->buffer = NULL;
-        buffer_init(sigar->performanceBuffers[i]);
-    }
-    
-    version.dwOSVersionInfoSize = sizeof(version);
-    GetVersionEx(&version);
+		sigar->performanceBuffers = (buffer_t**)malloc(sizeof(buffer_t *) * 5);
+		for (i = 0; i < 5; i++)
+		{
+			sigar->performanceBuffers[i] = (buffer_t*)malloc(sizeof(buffer_t));
+			sigar->performanceBuffers[i]->buffer = NULL;
+			buffer_init(sigar->performanceBuffers[i]);
+		}
 
-    /*
-     * 4 == NT 4.0
-     * 5 == 2000, XP, 2003 Server
-     */
-    sigar->winnt = (version.dwMajorVersion == 4);
+		version.dwOSVersionInfoSize = sizeof(version);
+		GetVersionEx(&version);
 
-    if (USING_WIDE_S(sigar)) {
-        WCHAR wmachine[MAX_PATH+1];
+		/*
+		 * 4 == NT 4.0
+		 * 5 == 2000, XP, 2003 Server
+		 */
+		sigar->winnt = (version.dwMajorVersion == 4);
 
-        SIGAR_A2W(sigar->machine, wmachine, sizeof(wmachine));
+		if (USING_WIDE_S(sigar)) {
+			WCHAR wmachine[MAX_PATH + 1];
 
-        result = RegConnectRegistryW(wmachine,
-                                     HKEY_PERFORMANCE_DATA,
-                                     &sigar->handle);
-    }
-    else {
-        result = RegConnectRegistryA(sigar->machine,
-                                     HKEY_PERFORMANCE_DATA,
-                                     &sigar->handle);
-    }
+			SIGAR_A2W(sigar->machine, wmachine, sizeof(wmachine));
 
-    get_sysinfo(sigar);
+			result = RegConnectRegistryW(wmachine,
+				HKEY_PERFORMANCE_DATA,
+				&sigar->handle);
+		}
+		else {
+			result = RegConnectRegistryA(sigar->machine,
+				HKEY_PERFORMANCE_DATA,
+				&sigar->handle);
+		}
 
-    DLLMOD_COPY(wtsapi);
-    DLLMOD_COPY(iphlpapi);
-    DLLMOD_COPY(advapi);
-    DLLMOD_COPY(ntdll);
-    DLLMOD_COPY(psapi);
-    DLLMOD_COPY(winsta);
-    DLLMOD_COPY(kernel);
-    DLLMOD_COPY(mpr);
+		get_sysinfo(sigar);
 
-    sigar->log_level = -1; /* else below segfaults */
-    /* XXX init early for use by javasigar.c */
-    sigar_dllmod_init(sigar,
-                      (sigar_dll_module_t *)&sigar->advapi,
-                      FALSE);
+		DLLMOD_COPY(wtsapi);
+		DLLMOD_COPY(iphlpapi);
+		DLLMOD_COPY(advapi);
+		DLLMOD_COPY(ntdll);
+		DLLMOD_COPY(psapi);
+		DLLMOD_COPY(winsta);
+		DLLMOD_COPY(kernel);
+		DLLMOD_COPY(mpr);
 
-    sigar->netif_mib_rows = NULL;
-    sigar->netif_addr_rows = NULL;
-    sigar->netif_adapters = NULL;
-    sigar->netif_names = NULL;
-    sigar->netif_name_short = netif_name_short();
+		sigar->log_level = -1; /* else below segfaults */
+		/* XXX init early for use by javasigar.c */
+		sigar_dllmod_init(sigar,
+			(sigar_dll_module_t *)&sigar->advapi,
+			FALSE);
 
-    sigar->pinfo.pid = -1;
-    sigar->ws_version = 0;
-    sigar->lcpu = -1;
+		sigar->netif_mib_rows = NULL;
+		sigar->netif_addr_rows = NULL;
+		sigar->netif_adapters = NULL;
+		sigar->netif_names = NULL;
+		sigar->netif_name_short = netif_name_short();
 
-    /* increase process visibility */
-    sigar_enable_privilege(SE_DEBUG_NAME);
+		sigar->pinfo.pid = -1;
+		sigar->ws_version = 0;
+		sigar->lcpu = -1;
 
+		/* increase process visibility */
+		sigar_enable_privilege(SE_DEBUG_NAME);
+	}
     return result;
 }
 
@@ -1823,7 +1824,7 @@ SIGAR_DECLARE(int) sigar_proc_exe_get(sigar_t *sigar, sigar_pid_t pid,
 #endif
     if (procexe->cwd[0] != '\0') {
         /* strip trailing '\' */
-        int len = strlen(procexe->cwd);
+        size_t len = strlen(procexe->cwd);
         if (procexe->cwd[len-1] == '\\') {
             procexe->cwd[len-1] = '\0';
         }
@@ -2207,7 +2208,6 @@ sigar_file_system_usage_get(sigar_t *sigar,
     BOOL retval;
     ULARGE_INTEGER avail, total, free;
     int status;
-	char drive[30];
 
     /* prevent dialog box if A:\ drive is empty */
     UINT errmode = SetErrorMode(SEM_FAILCRITICALERRORS);

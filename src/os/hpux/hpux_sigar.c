@@ -777,7 +777,12 @@ static int sigar_get_mib_info(sigar_t *sigar,
             return errno;
         }
     }
-    return get_mib_info(sigar->mib, parms);
+    if (get_mib_info(sigar->mib, parms)) {
+        close_mib(sigar->mib);
+        return errno;
+    }
+
+    return SIGAR_OK   
 }
 
 /* wrapper around get_physical_stat() */
