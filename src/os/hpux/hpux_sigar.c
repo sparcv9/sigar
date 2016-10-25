@@ -115,8 +115,8 @@ int sigar_swap_get(sigar_t *sigar, sigar_swap_t *swap)
             swapinfo.pss_nblksenabled = swapinfo.pss_nfpgs;
         }
 
-        swap->total += swapinfo.pss_nblksenabled;
-        swap->free  += swapinfo.pss_nfpgs;
+        swap->total += swapinfo.pss_nblksenabled * 1024LL;
+        swap->free  += swapinfo.pss_nfpgs * 1024LL;
     }
 
     swap->used = swap->total - swap->free;
