@@ -782,7 +782,7 @@ static int sigar_get_mib_info(sigar_t *sigar,
         return errno;
     }
 
-    return SIGAR_OK   
+    return SIGAR_OK;
 }
 
 /* wrapper around get_physical_stat() */
@@ -1198,29 +1198,29 @@ int sigar_net_connection_walk(sigar_net_connection_walker_t *walker)
 }
 
 SIGAR_DECLARE(int)
-	sigar_net_listeners_get(sigar_net_connection_walker_t *walker)
+    sigar_net_listeners_get(sigar_net_connection_walker_t *walker)
 {
-	int i, status;
+    int i, status;
 
-	status = sigar_net_connection_walk(walker);
+    status = sigar_net_connection_walk(walker);
 
-	if (status != SIGAR_OK) {
-		return status;
-	}
+    if (status != SIGAR_OK) {
+        return status;
+    }
 
-	sigar_net_connection_list_t *list = walker->data;
+    sigar_net_connection_list_t *list = walker->data;
 
-	sigar_pid_t pid;
-	for (i = 0; i < list->number; i++) {
-		status = sigar_proc_port_get(walker->sigar, walker->flags,
-			list->data[i].local_port, &pid);
+    sigar_pid_t pid;
+    for (i = 0; i < list->number; i++) {
+        status = sigar_proc_port_get(walker->sigar, walker->flags,
+            list->data[i].local_port, &pid);
 
-		if (status == SIGAR_OK) {
-			list->data[i].pid = pid;
-		}
-	}
+        if (status == SIGAR_OK) {
+            list->data[i].pid = pid;
+        }
+    }
 
-	return SIGAR_OK;
+    return SIGAR_OK;
 }
 
 #define tcpsoff(x) sigar_offsetof(sigar_tcp_t, x)
