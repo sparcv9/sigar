@@ -1204,6 +1204,11 @@ int sigar_os_fs_type_get(sigar_file_system_t *fsp)
             fsp->type = SIGAR_FSTYPE_LOCAL_DISK;
         }
         break;
+      case 'g2':
+        if (strEQ(type, "gfs2")) {
+            fsp->type = SIGAR_FSTYPE_LOCAL_DISK;
+        }
+        break;
       case 'h':
         if (strEQ(type, "hpfs")) {
             fsp->type = SIGAR_FSTYPE_LOCAL_DISK;
