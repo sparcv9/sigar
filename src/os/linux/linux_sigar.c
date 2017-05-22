@@ -1200,7 +1200,7 @@ int sigar_os_fs_type_get(sigar_file_system_t *fsp)
         }
         break;
       case 'g':
-        if (strEQ(type, "gfs", 3)) {
+        if (strnEQ(type, "gfs", 3)) {
             fsp->type = SIGAR_FSTYPE_LOCAL_DISK;
         }
         break;
